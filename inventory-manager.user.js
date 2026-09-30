@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/neo5322/inventory-manager-userscript/issues
 // @updateURL    https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
-// @version      2.2.0
+// @version      2.3.0
 // @description  인벤토리 관리, 누이 이미지 페이지 분할·간략화 및 개별/ZIP 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
