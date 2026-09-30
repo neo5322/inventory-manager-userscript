@@ -149,6 +149,79 @@
     return catalog;
   }
 
+  function getVerifiedSecretNuiSource() {
+    return [
+      { name: '메이드누이 No.149 Secret BLUE BUNNY', image: 'https://prm.dothome.co.kr/uploads/log_img_20260823230209_1807.webp', category: '메이드' },
+      { name: '메이드누이 No.43 불꽃의 변호사님(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260823230130_7982.webp', category: '메이드' },
+      { name: '메이드누이 No.33 윈도우 디스트로이어(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260816113746_9904.webp', category: '메이드' },
+      { name: '메이드누이 No.76 Secret CHOCO', image: 'https://prm.dothome.co.kr/uploads/log_img_20260816113714_4838.webp', category: '메이드' },
+      { name: '메이드누이 No.93 Secret NEKO', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060902_3579.webp', category: '메이드' },
+      { name: '메이드누이 No.125 이웃집 청소부(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060715_3401.webp', category: '메이드' },
+      { name: '메이드누이 No.166 새로운 시작의 메이드(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060508_4527.webp', category: '메이드' },
+      { name: '메이드누이 No.139 Secret GIANT', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060140_6854.webp', category: '메이드' },
+      { name: '미코누이 No.83 탐정 조수 메이드(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231748_4276.webp', category: '미코' },
+      { name: '미코누이 No.130 금벽의 성녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231706_1529.webp', category: '미코' },
+      { name: '미코누이 No.68 Secret SENSEI', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231640_7042.webp', category: '미코' },
+      { name: '미코누이 No.120 미혹의 라일락(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231615_5498.webp', category: '미코' },
+      { name: '미코누이 No.59 후르츠 퓨어 걸(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260803010610_8507.webp', category: '미코' },
+      { name: '미코누이 No.57 파멸적인 대악마(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260803010548_9910.webp', category: '미코' },
+      { name: '미코누이 No.93 Secret Neko', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010921_1807.webp', category: '미코' },
+      { name: '미코누이 No.58 꼬마 탐정 소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010900_3323.webp', category: '미코' },
+      { name: '미코누이 No.94 플래티넘 장난꾸러기(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010830_5761.webp', category: '미코' },
+      { name: '미코누이 No.21 청의 문학소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010800_9095.webp', category: '미코' },
+      { name: '미코누이 No.75 표리의 아가씨 : 금(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260804020927_3850.webp', category: '미코' },
+      { name: '메이드누이 No.145 Secret MONKEY(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905184750_1120.webp', category: '메이드' },
+      { name: '메이드누이 No.100 여백을 덧칠하는 자(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905184750_5034.webp', category: '메이드' },
+      { name: '메이드누이 No.81 요염한 네이쳐 걸(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905184750_9792.webp', category: '메이드' },
+      { name: '아이돌누이 No.117 적안의 세이렌(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_6553.webp', category: '아이돌' },
+      { name: '아이돌누이 No.104 화원을 지키는 소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_5376.webp', category: '아이돌' },
+      { name: '아이돌누이 No.79 홍금의 아가씨(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_7324.webp', category: '아이돌' },
+      { name: '아이돌누이 No.56 사채꾼 모나미 소년(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_8482.webp', category: '아이돌' },
+      { name: '아이돌누이 No.51 연분홍의 아가씨(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_7506.webp', category: '아이돌' },
+      { name: '스쿨누이 No.183 최고의 완벽 천재 메이드(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_4882.webp', category: '스쿨' },
+      { name: '스쿨누이 No.137 꿈꾸는 라이더(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_6297.webp', category: '스쿨' },
+      { name: '스쿨누이 No.84 은백의 니트(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_2544.webp', category: '스쿨' },
+      { name: '스쿨누이 No.74 허리케인 포니테일(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_1807.webp', category: '스쿨' },
+      { name: '스쿨누이 No.23 숲속 별과 꽃의 소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_5698.webp', category: '스쿨' },
+    ];
+  }
+
+  function getVerifiedSecretNuiCatalog(cards) {
+    const seen = new Set();
+    const catalog = [];
+
+    (cards || []).forEach((card) => {
+      const name = normalizeItemName(card && card.name);
+      const image = String(card && card.image || '').trim();
+      const category = normalizeItemName(card && card.category) || '기타';
+
+      if (
+        !name
+        || !/(?:누이|누잏)/i.test(name)
+        || !/No\s*\.\s*\d+/i.test(name)
+        || !/시크릿|secret/i.test(name)
+        || !/^https:\/\/prm\.dothome\.co\.kr\/uploads\//i.test(image)
+      ) {
+        return;
+      }
+
+      const key = JSON.stringify([name, image]);
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      catalog.push({
+        key,
+        name,
+        image,
+        category,
+        grade: 'secret',
+        isSecret: true,
+      });
+    });
+
+    return catalog;
+  }
+
   function filterNuiWantedCatalog(catalog, query, category) {
     const normalizedQuery = normalizeNuiWantedText(query);
     const normalizedCategory = String(category || 'all');
@@ -1819,8 +1892,10 @@
   }
 
   function getNuiWantedCatalog() {
-    return getOrdinaryNuiCatalog(getNuiWantedSource())
-      .filter((card) => !isExcludedNuiWantedCard(card));
+    return [
+      ...getOrdinaryNuiCatalog(getNuiWantedSource()),
+      ...getVerifiedSecretNuiCatalog(getVerifiedSecretNuiSource()),
+    ].filter((card) => !isExcludedNuiWantedCard(card));
   }
   // END NUI WANTED CORE
 
@@ -3977,7 +4052,7 @@
       ],
       'nui-wanted': [
         '누이 구해요',
-        '원하는 일반 누이를 고르고 구함 이미지 PNG를 만듭니다.',
+        '구해요 목록에서 원하는 누이를 고르고 PNG를 만듭니다.',
       ],
     };
   }
@@ -4346,7 +4421,7 @@
             >
               <strong>누이 구해요 이미지</strong>
               <span>
-                일반 누이 ${formatNumber(NUI_WANTED_CATALOG.length)}종 중 원하는 누이를 선택
+                구해요 누이 ${formatNumber(NUI_WANTED_CATALOG.length)}종 중 원하는 누이를 선택
               </span>
             </button>
           </div>
@@ -5612,7 +5687,7 @@
     return `
       <div class="im2-nui-stats">
         <span class="im2-status-chip">
-          일반 누이
+          구해요 누이
           <strong>${formatNumber(NUI_WANTED_CATALOG.length)}</strong>종
         </span>
 
@@ -5622,7 +5697,7 @@
         </span>
 
         <span class="im2-status-chip">
-          공개 카드 관측 목록 · Secret 제외
+          공개 관측 목록 + 시크릿 선택권 확인 · Secret 포함
         </span>
       </div>
 
