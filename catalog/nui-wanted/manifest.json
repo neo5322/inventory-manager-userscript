@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "ordinary-selection",
+      "kind": "ordinary",
+      "format": "catalog",
+      "file": "sources/ordinary-selection.json"
+    },
+    {
+      "id": "verified-secret-selection",
+      "kind": "secret",
+      "format": "modal",
+      "file": "sources/verified-secret-selection.json"
+    }
+  ]
+}

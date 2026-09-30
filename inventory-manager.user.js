@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/neo5322/inventory-manager-userscript/issues
 // @updateURL    https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
-// @version      2.3.0
+// @version      2.4.0
 // @description  인벤토리 관리, 누이 이미지 페이지 분할·간략화 및 개별/ZIP 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
@@ -94,6 +94,23 @@
       === '밤피누이 No.81 요염한 네이처 밤피';
   }
 
+  function getPrmUploadUrl(value) {
+    const raw = String(value || '').trim();
+    if (!/^(?:https:\/\/prm\.dothome\.co\.kr\/uploads\/|\/?uploads\/)/i.test(raw)) {
+      return '';
+    }
+    try {
+      const url = new URL(raw, 'https://prm.dothome.co.kr/');
+      return url.origin === 'https://prm.dothome.co.kr'
+        && !url.username && !url.password
+        && url.pathname.startsWith('/uploads/')
+        ? url.href
+        : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   function normalizeNuiDownloadMode(value) {
     return value === 'zip' ? 'zip' : 'individual';
   }
@@ -119,12 +136,13 @@
 
     (cards || []).forEach((card) => {
       const name = normalizeItemName(card && card.name);
-      const image = String(card && card.image || '').trim();
+      const rawImage = String(card && card.image || '').trim();
+      const image = getPrmUploadUrl(rawImage);
       const grade = String(card && card.grade || '').trim();
 
       if (
         !name
-        || !/^https:\/\/prm\.dothome\.co\.kr\/uploads\//i.test(image)
+        || !image || image !== rawImage
         || (card && card.isSecret)
         || /시크릿|secret/i.test(name)
         || /시크릿|secret/i.test(grade)
@@ -149,50 +167,14 @@
     return catalog;
   }
 
-  function getVerifiedSecretNuiSource() {
-    return [
-      { name: '메이드누이 No.149 Secret BLUE BUNNY', image: 'https://prm.dothome.co.kr/uploads/log_img_20260823230209_1807.webp', category: '메이드' },
-      { name: '메이드누이 No.43 불꽃의 변호사님(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260823230130_7982.webp', category: '메이드' },
-      { name: '메이드누이 No.33 윈도우 디스트로이어(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260816113746_9904.webp', category: '메이드' },
-      { name: '메이드누이 No.76 Secret CHOCO', image: 'https://prm.dothome.co.kr/uploads/log_img_20260816113714_4838.webp', category: '메이드' },
-      { name: '메이드누이 No.93 Secret NEKO', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060902_3579.webp', category: '메이드' },
-      { name: '메이드누이 No.125 이웃집 청소부(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060715_3401.webp', category: '메이드' },
-      { name: '메이드누이 No.166 새로운 시작의 메이드(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060508_4527.webp', category: '메이드' },
-      { name: '메이드누이 No.139 Secret GIANT', image: 'https://prm.dothome.co.kr/uploads/log_img_20260815060140_6854.webp', category: '메이드' },
-      { name: '미코누이 No.83 탐정 조수 메이드(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231748_4276.webp', category: '미코' },
-      { name: '미코누이 No.130 금벽의 성녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231706_1529.webp', category: '미코' },
-      { name: '미코누이 No.68 Secret SENSEI', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231640_7042.webp', category: '미코' },
-      { name: '미코누이 No.120 미혹의 라일락(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260806231615_5498.webp', category: '미코' },
-      { name: '미코누이 No.59 후르츠 퓨어 걸(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260803010610_8507.webp', category: '미코' },
-      { name: '미코누이 No.57 파멸적인 대악마(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260803010548_9910.webp', category: '미코' },
-      { name: '미코누이 No.93 Secret Neko', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010921_1807.webp', category: '미코' },
-      { name: '미코누이 No.58 꼬마 탐정 소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010900_3323.webp', category: '미코' },
-      { name: '미코누이 No.94 플래티넘 장난꾸러기(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010830_5761.webp', category: '미코' },
-      { name: '미코누이 No.21 청의 문학소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260729010800_9095.webp', category: '미코' },
-      { name: '미코누이 No.75 표리의 아가씨 : 금(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260804020927_3850.webp', category: '미코' },
-      { name: '메이드누이 No.145 Secret MONKEY(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905184750_1120.webp', category: '메이드' },
-      { name: '메이드누이 No.100 여백을 덧칠하는 자(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905184750_5034.webp', category: '메이드' },
-      { name: '메이드누이 No.81 요염한 네이쳐 걸(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905184750_9792.webp', category: '메이드' },
-      { name: '아이돌누이 No.117 적안의 세이렌(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_6553.webp', category: '아이돌' },
-      { name: '아이돌누이 No.104 화원을 지키는 소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_5376.webp', category: '아이돌' },
-      { name: '아이돌누이 No.79 홍금의 아가씨(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_7324.webp', category: '아이돌' },
-      { name: '아이돌누이 No.56 사채꾼 모나미 소년(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_8482.webp', category: '아이돌' },
-      { name: '아이돌누이 No.51 연분홍의 아가씨(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260905181710_7506.webp', category: '아이돌' },
-      { name: '스쿨누이 No.183 최고의 완벽 천재 메이드(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_4882.webp', category: '스쿨' },
-      { name: '스쿨누이 No.137 꿈꾸는 라이더(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_6297.webp', category: '스쿨' },
-      { name: '스쿨누이 No.84 은백의 니트(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_2544.webp', category: '스쿨' },
-      { name: '스쿨누이 No.74 허리케인 포니테일(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_1807.webp', category: '스쿨' },
-      { name: '스쿨누이 No.23 숲속 별과 꽃의 소녀(Secret Ver.)', image: 'https://prm.dothome.co.kr/uploads/log_img_20260914173014_5698.webp', category: '스쿨' },
-    ];
-  }
-
   function getVerifiedSecretNuiCatalog(cards) {
     const seen = new Set();
     const catalog = [];
 
     (cards || []).forEach((card) => {
       const name = normalizeItemName(card && card.name);
-      const image = String(card && card.image || '').trim();
+      const rawImage = String(card && card.image || '').trim();
+      const image = getPrmUploadUrl(rawImage);
       const category = normalizeItemName(card && card.category) || '기타';
 
       if (
@@ -200,7 +182,7 @@
         || !/(?:누이|누잏)/i.test(name)
         || !/No\s*\.\s*\d+/i.test(name)
         || !/시크릿|secret/i.test(name)
-        || !/^https:\/\/prm\.dothome\.co\.kr\/uploads\//i.test(image)
+        || !image || image !== rawImage
       ) {
         return;
       }
@@ -379,10 +361,25 @@
   }
 
   function sortNuiImageItems(items) {
+    const collator = new Intl.Collator('ko', {
+      sensitivity: 'base',
+      numeric: true,
+    });
+
     return (items || [])
-      .map((item, index) => ({ item, index }))
+      .map((item, index) => ({
+        item,
+        index,
+        type: getNuiTypeLabel(item),
+        number: getNuiItemNumber(item),
+        alias: getNuiCharacterAlias(item),
+        name: normalizeItemName(item && (item.itemName || item.name)),
+      }))
       .sort((left, right) =>
-        compareNuiImageItems(left.item, right.item)
+        collator.compare(left.type, right.type)
+        || (left.number < right.number ? -1 : left.number > right.number ? 1 : 0)
+        || collator.compare(left.alias, right.alias)
+        || collator.compare(left.name, right.name)
         || left.index - right.index,
       )
       .map(({ item }) => item);
@@ -596,1310 +593,100 @@
     return pages;
   }
 
-  function getNuiWantedSource() {
-    return [
-  {
-    "name": "밤피누이 No.81 요염한 네이처 밤피",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260813023043_7132.webp",
-    "category": "기타",
-    "grade": "unique"
-  },
-  {
-    "name": "누잏 No.13 프리덤 소시민",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123431_9480.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.21 청의 문학소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123512_3786.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.23 숲속 별과 꽃의 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123548_2595.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.35 고스트 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123621_8273.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.36 파란만장 네이쳐 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830181837_5267.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.38 나비신의 대리자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123645_3536.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.41 골든 로얄 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260924003820_4804.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.44 행동으로 하는 것도",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123708_2915.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.48 톰보이 복서",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123732_4671.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.54 적염의 마녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123816_8234.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.55 기묘한 선글라스 청년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123840_1317.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.56 사채꾼 모나미 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123905_2545.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.58 꼬마 탐정 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182010_6397.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.59 후르츠 퓨어 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829123933_7169.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.61 에투알 구르메",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182031_7358.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.65 날먹을 꿈꾸는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182059_8049.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.74 허리케인 포니테일",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830183322_7471.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.80 적은의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182146_7234.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.81 요염한 네이쳐 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829124021_1005.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.84 은백의 니트",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829124058_2241.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.90 녹안의 무녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829124116_8554.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.100 여백을 덧칠하는 자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182159_5138.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.110 완전폐품 미들가이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182230_5140.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.113 홍적의 파티시에",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182308_7272.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.114 연홍의 재벌",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829124223_1203.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.125 이웃집 청소부",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182327_1291.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.137 꿈꾸는 라이더",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182339_7754.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.158 은백의 쌍둥이 : 령",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182441_8283.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.159 은백의 쌍둥이 : 련",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260830182421_4563.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.167 백로의 빛",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829124310_7419.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.183 최고의 완벽 천재 메이드",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829124333_7536.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.192 민들레 향의 미망인",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260924003838_9713.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.197 천방지축 꼬마 권법가",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829124408_5834.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "누잏 No.212 무대 밖의 배우",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260924003839_2033.webp",
-    "category": "누잏",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.17 표리의 아가씨 : 주홍",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225212_4155.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.18 표리의 아가씨 : 남청",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225246_2688.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.19 표리의 아가씨 : 녹",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225315_7362.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.21 청의 문학소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225347_7012.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.22 깊은 와인향의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225408_3168.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.23 숲속 별과 꽃의 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225425_2001.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.27 비대칭의 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060949_5644.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.33 윈도우 디스트로이어",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260816113837_3739.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.35 고스트 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060555_5897.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.38 나비신의 대리자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815055825_1003.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.43 불꽃의 변호사님",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225449_1086.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.51 연분홍의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815055915_2834.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.55 기묘한 선글라스 청년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815061049_1717.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.56 사채꾼 모나미 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225511_6755.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.57 파멸적인 대악마",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260816113641_2505.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.58 꼬마 탐정 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060928_8906.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.59 후르츠 퓨어 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815061006_1112.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.65 날먹을 꿈꾸는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_1606.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.66 백은의 꼬마 교수",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225543_5274.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.72 백합의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060427_6084.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.73 사랑을 꿈꾸는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225611_9554.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.74 허리케인 포니테일",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225655_3548.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.76 가토 쇼콜라",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_8225.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.79 홍금의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225811_1765.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.80 적은의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060348_4168.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.81 요염한 네이쳐 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_9021.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.84 은백의 니트",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060251_1348.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.90 녹안의 참새",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225850_3781.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.91 차분한 사진가",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_2400.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.94 플래티넘 장난꾸러기",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225903_3334.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.100 여백을 덧칠하는 자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_3587.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.104 화원을 지키는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060158_1674.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.105 술고래 선생님",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060645_1135.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.106 빛나는 안경의 기자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225925_5449.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.113 홍적의 파티시에",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060801_3669.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.114 연홍의 재벌",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060011_2622.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.114 티엔-상(ULTRA RARE Ver.)",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060044_9172.webp",
-    "category": "메이드",
-    "grade": "unique"
-  },
-  {
-    "name": "메이드누이 No.115 자유계 요리사 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060847_9920.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.116 식신룡",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823225959_6148.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.117 적안의 세이렌",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_6568.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.118 한쪽 눈을 가린 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823230027_6804.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.121 극도를 꿈꾸는 자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815055944_7401.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.122 백안의 견우",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_7895.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.125 이웃집 청소부",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060739_5456.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.142 해학의 물거품",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260823230054_9901.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.146 평범을 동경하는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060823_4966.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.150 수다쟁이 액트리스",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060223_6041.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.156 화이트 스타체이서",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184749_4142.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.160 은의 안식처",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184750_2522.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.166 새로운 시작의 메이드",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060538_8038.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.167 백로의 빛",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060328_2398.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.183 최고의 완벽 천재 메이드",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815060116_2010.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.185 흑적의 장난꾸러기 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260815061027_4115.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "메이드누이 No.192 민들레 향의 미망인",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905184750_1093.webp",
-    "category": "메이드",
-    "grade": "uncommon"
-  },
-  {
-    "name": "미코누이 No.1 중앙의 지배자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010710_6775.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.17 표리의 아가씨 : 주홍",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005354_6890.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.18 표리의 아가씨 : 남청",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005329_1736.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.19 표리의 아가씨 : 녹",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010321_2159.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.21 청의 문학소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004922_4939.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.22 깊은 와인향의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010456_3933.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.23 무녀모험단 : 별꽃(ULTRA RARE Ver.)",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260911140504_8740.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.23 숲속 별과 꽃의 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005124_3056.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.26 말로 하는 것도",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803005950_8437.webp",
-    "category": "미코",
-    "grade": "uncommon"
-  },
-  {
-    "name": "미코누이 No.27 비대칭의 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004547_7958.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.29 괴담을 자아내는 자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231516_7506.webp",
-    "category": "미코",
-    "grade": "uncommon"
-  },
-  {
-    "name": "미코누이 No.35 고스트 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231009_6971.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.37 몰개성 선글라스",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010641_3027.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.37 무녀모험단 : 돼지수육(LEGENDARY Ver.)",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260911140620_1728.webp",
-    "category": "미코",
-    "grade": "epic"
-  },
-  {
-    "name": "미코누이 No.38 청록 지붕 아래의 장남",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260807161008_5098.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.41 골든 로얄 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010121_5529.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.44 행동으로 하는 것도",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005100_3451.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.45 춤추는 아이리스",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010142_7605.webp",
-    "category": "미코",
-    "grade": "uncommon"
-  },
-  {
-    "name": "미코누이 No.51 연분홍의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005212_4294.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.53 심연의 레이디 킬러",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231142_8631.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.54 적염의 마녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004420_8254.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.55 기묘한 선글라스 청년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004446_4235.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.56 사채꾼 모나미 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231451_6584.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.57 파멸적인 대악마",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010015_4251.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.58 꼬마 탐정 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005154_1455.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.59 후르츠 퓨어 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010213_2953.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.65 날먹을 꿈꾸는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004617_3476.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.65 무녀모험단 : 하나(ULTRA RARE Ver.)",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260911140534_6202.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.66 백은의 꼬마 교수",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010307_4692.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.72 백합의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004344_9842.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.73 사랑을 꿈꾸는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010407_7457.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.74 허리케인 포니테일",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231122_6231.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.75 표리의 아가씨 : 금",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260804020938_2703.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.75 표리의 아가씨 : 금",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010345_1662.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.79 홍금의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803005928_2210.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.80 적은의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005259_8501.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.81 요염한 네이쳐 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010248_7855.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.81.5  정 빼고 다 받은 금발 인간",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260821014825_8493.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.83 탐정 조수 메이드",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231534_4344.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.84 무녀모험단 : 해바라기(ULTRA RARE Ver.)",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260911140419_4779.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.84 은백의 니트",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004800_7981.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.85 블링블링 핑크 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010620_7274.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.87 정의의 폴리스",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231204_2854.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.90 녹안의 무녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004700_2541.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.91 차분한 사진가",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010341_6323.webp",
-    "category": "미코",
-    "grade": "uncommon"
-  },
-  {
-    "name": "미코누이 No.94 플래티넘 장난꾸러기",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005034_9504.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.97 백의의 이과소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260804020907_8728.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.97 백의의 이과소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004848_7723.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.98 밤하늘의 마술사",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231339_2807.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.104 화원을 지키는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231102_3323.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.107 망각의 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729005010_9118.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.111 무구의 제비꽃 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231414_8762.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.113 홍적의 파티시에",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010427_8146.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.114 연홍의 재벌",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004828_6039.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.116 식신룡",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803005851_8928.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.117 적안의 세이렌",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729010550_4203.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.118 한쪽 눈을 가린 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004719_4345.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.120 미혹의 라일락",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231046_3172.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.123 남국의 열정적 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010402_9699.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.126 백안의 직녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260729004948_7831.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.127 바이올런스 시스터",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231254_4871.webp",
-    "category": "미코",
-    "grade": "uncommon"
-  },
-  {
-    "name": "미코누이 No.130 금벽의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231313_4224.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.137 꿈꾸는 라이더",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010523_4085.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.138 용감한 스노우 프린세스",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260803010234_5025.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.146 평범을 동경하는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231432_2732.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.148 꿈꾸는 펭귄",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231553_7332.webp",
-    "category": "미코",
-    "grade": "unique"
-  },
-  {
-    "name": "미코누이 No.167 백로의 빛",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260806231235_3412.webp",
-    "category": "미코",
-    "grade": "uncommon"
-  },
-  {
-    "name": "미코누이 대머리 아저씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260829125831_7637.webp",
-    "category": "미코",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.13 프리덤 소시민",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_6736.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.19 표리의 아가씨 : 녹",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_7944.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.21 청의 문학소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_5030.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.45 춤추는 아이리스",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_6047.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.48 링 밖의 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_3368.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.55 기묘한 선글라스 청년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_1253.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.59 후르츠 퓨어 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_5528.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.65 날먹을 꿈꾸는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_9207.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.66 백은의 꼬마 교수",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_6722.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.73 사랑을 꿈꾸는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_4078.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.74 허리케인 포니테일",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_2468.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.84 은백의 니트",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_2672.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.85 블링블링 핑크 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_2711.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.90 녹안의 참새",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_5280.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.104 화원을 지키는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_4787.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.115 자유계 요리사 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_2799.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.118 한쪽 눈을 가린 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_1968.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.121 극도를 꿈꾸는 자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_4183.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.125 이웃집 청소부",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_9267.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.146 평범을 동경하는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_2192.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.149 표리의 아가씨 : 벽(Another Ver.)",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_2443.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.157 공방의 작은 요정(ULTRA RARE Ver.)",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_5126.webp",
-    "category": "스쿨",
-    "grade": "unique"
-  },
-  {
-    "name": "스쿨누이 No.167 백로의 빛",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_5644.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "스쿨누이 No.214 거울 속의 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260914173014_2540.webp",
-    "category": "스쿨",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.13 프리덤 소시민",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_9140.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.17 표리의 아가씨 : 주홍",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_7155.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.21 청의 문학소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260906123249_8395.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.23 숲속 별과 꽃의 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_6952.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.27 비대칭의 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_6238.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.35 고스트 보이",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_1740.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.38 나비신의 대리자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_1036.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.44 행동으로 하는 것도",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_9980.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.51 연분홍의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_7421.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.54 적염의 마녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_8126.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.55 기묘한 선글라스 청년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_4043.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.56 사채꾼 모나미 소년",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181708_2732.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.59 후르츠 퓨어 걸",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_8593.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.66 백은의 꼬마 교수",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_4633.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.72 백합의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_9692.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.74 허리케인 포니테일",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_2282.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.79 홍금의 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_7137.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.80 적은의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260906123237_2425.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.80 적은의 성녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_1557.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.84 은백의 니트",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260906123229_3150.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.90 녹안의 참새",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_3047.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.104 화원을 지키는 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_6056.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.106 빛나는 안경의 기자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_8420.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.111 무구의 제비꽃 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_4982.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.116 식신룡",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_3715.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.117 적안의 세이렌",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_5621.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.118 한쪽 눈을 가린 소녀",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_1322.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.121 극도를 꿈꾸는 자",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_3734.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.138 용감한 스노우 프린세스",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_9870.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.158 은백의 쌍둥이 : 련",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_3581.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.164 페르소나 아이돌",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_4127.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.165 초보 농부 아가씨",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_3958.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.167 백로의 빛",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_5779.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  },
-  {
-    "name": "아이돌누이 No.192 민들레 향의 미망인",
-    "image": "https://prm.dothome.co.kr/uploads/log_img_20260905181709_7121.webp",
-    "category": "아이돌",
-    "grade": "uncommon"
-  }
-];
+  function getNuiModalChoiceCards(choices) {
+    return (choices || []).flatMap((choice) => {
+      if (!choice || choice.type !== 'item') return [];
+
+      const name = normalizeItemName(choice.item_name);
+      const image = getPrmUploadUrl(choice.img_url);
+      if (!image) return [];
+
+      const categoryMatch = name.match(/^(.+?)\s*누이(?:\s|$)/i);
+      return [{
+        name,
+        image,
+        category: normalizeItemName(categoryMatch && categoryMatch[1])
+          || getNuiTypeLabel({ name }),
+        grade: String(choice.item_grade || '').trim(),
+      }];
+    });
   }
 
-  function getNuiWantedCatalog() {
-    return [
-      ...getOrdinaryNuiCatalog(getNuiWantedSource()),
-      ...getVerifiedSecretNuiCatalog(getVerifiedSecretNuiSource()),
-    ].filter((card) => !isExcludedNuiWantedCard(card));
+  function getNuiWantedCatalog(sources) {
+    if (!Array.isArray(sources) || !sources.length) {
+      throw new Error('누이 구해요 소스 목록이 비어 있습니다.');
+    }
+    const seen = new Set();
+    const catalog = [];
+    const sourceIds = new Set();
+
+    (sources || []).forEach((source) => {
+      if (!source || !['ordinary', 'secret'].includes(source.kind)
+        || !['catalog', 'modal'].includes(source.format)
+        || !/^[a-z0-9][a-z0-9-]*$/.test(source.id || '')
+        || sourceIds.has(source.id)
+        || !Array.isArray(source.cards)
+        || !source.cards.length) {
+        throw new Error('알 수 없는 누이 구해요 소스 형식입니다.');
+      }
+      sourceIds.add(source.id);
+
+      const sourceCards = source.format === 'modal'
+        ? getNuiModalChoiceCards(source.cards)
+        : source.cards;
+      const cards = source.kind === 'secret'
+        ? getVerifiedSecretNuiCatalog(sourceCards)
+        : getOrdinaryNuiCatalog(sourceCards);
+      if (cards.length !== source.cards.length) {
+        throw new Error(`누이 구해요 소스 ${source.id}에 누락·중복 항목이 있습니다.`);
+      }
+
+      cards.forEach((card) => {
+        if (isExcludedNuiWantedCard(card) || seen.has(card.key)) return;
+        seen.add(card.key);
+        catalog.push(card);
+      });
+    });
+
+    return catalog;
+  }
+
+  async function loadNuiWantedCatalog(fetchImpl, baseUrl) {
+    const readJson = async (file) => {
+      const response = await fetchImpl(new URL(file, baseUrl).href, { cache: 'no-cache' });
+      if (!response.ok) {
+        throw new Error(`누이 구해요 소스 ${file} 조회 실패 (${response.status})`);
+      }
+      return response.json();
+    };
+
+    const manifest = await readJson('manifest.json');
+    if (manifest && manifest.schemaVersion !== 1) {
+      throw new Error('지원하지 않는 누이 구해요 목록 버전입니다.');
+    }
+    if (!manifest || !Array.isArray(manifest.sources)
+      || !manifest.sources.length || manifest.sources.length > 50) {
+      throw new Error('누이 구해요 소스 목록이 올바르지 않습니다.');
+    }
+
+    const sources = await Promise.all(manifest.sources.map(async (entry) => {
+      if (!entry || !/^sources\/[a-z0-9-]+\.json$/.test(entry.file || '')) {
+        throw new Error('누이 구해요 소스 파일 경로가 올바르지 않습니다.');
+      }
+      return { ...entry, cards: await readJson(entry.file) };
+    }));
+
+    const cards = getNuiWantedCatalog(sources);
+    if (!cards.length) {
+      throw new Error('누이 구해요 목록이 비어 있습니다.');
+    }
+    return { sources, cards };
   }
   // END NUI WANTED CORE
 
-  const NUI_WANTED_CATALOG = getNuiWantedCatalog();
+  const NUI_WANTED_SOURCE_URL =
+    'https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/catalog/nui-wanted/';
+  const NUI_WANTED_CACHE_KEY = 'manosaba-inventory-manager:nui-wanted-catalog:v1';
 
   function toQuantity(value) {
     const number = Number(value);
@@ -2508,6 +1295,18 @@
 
   const storage = safeStorage();
 
+  let cachedWantedCards = [];
+  if (storage) {
+    try {
+      const cached = JSON.parse(storage.getItem(NUI_WANTED_CACHE_KEY) || 'null');
+      if (cached && cached.schemaVersion === 1) {
+        cachedWantedCards = getNuiWantedCatalog(cached.sources);
+      }
+    } catch (_) {
+      // 손상된 캐시는 무시하고 원격 소스를 다시 받습니다.
+    }
+  }
+
   const currentSaved = storage
     ? safeParse(storage.getItem(STORAGE_KEY), {})
     : {};
@@ -2573,12 +1372,17 @@
     nuiSelected: new Set(),
     nuiQuery: '',
     nuiFilter: 'all',
+    nuiWantedCatalog: cachedWantedCards,
+    nuiWantedSortedCatalog: sortNuiImageItems(cachedWantedCards),
+    nuiWantedCategories: [...new Set(
+      cachedWantedCards.map((card) => card.category),
+    )].sort((a, b) => a.localeCompare(b, 'ko')),
+    nuiWantedLoading: false,
+    nuiWantedError: null,
     nuiWantedSelected: new Set(
-      (Array.isArray(currentSaved.nuiWantedSelected)
+      Array.isArray(currentSaved.nuiWantedSelected)
         ? currentSaved.nuiWantedSelected
-        : []).filter(
-        (key) => NUI_WANTED_CATALOG.some((card) => card.key === key),
-      ),
+        : [],
     ),
     nuiWantedQuery: '',
     nuiWantedCategory: 'all',
@@ -2669,6 +1473,57 @@
     } catch (_) {
       // 저장 실패는 인벤토리 작업을 막지 않습니다.
     }
+  }
+
+  let wantedCatalogRequest = null;
+  let wantedCatalogRequested = false;
+
+  function applyNuiWantedCatalog(cards) {
+    state.nuiWantedCatalog = cards;
+    state.nuiWantedSortedCatalog = sortNuiImageItems(cards);
+    state.nuiWantedCategories = [...new Set(
+      cards.map((card) => card.category),
+    )].sort((left, right) => left.localeCompare(right, 'ko'));
+    if (state.nuiWantedCategory !== 'all'
+      && !state.nuiWantedCategories.includes(state.nuiWantedCategory)) {
+      state.nuiWantedCategory = 'all';
+    }
+  }
+
+  function refreshNuiWantedCatalog() {
+    if (wantedCatalogRequest) return wantedCatalogRequest;
+
+    wantedCatalogRequested = true;
+    state.nuiWantedLoading = true;
+    state.nuiWantedError = null;
+    renderApp();
+
+    const controller = new AbortController();
+    const timeout = win.setTimeout(() => controller.abort(), 15000);
+    wantedCatalogRequest = loadNuiWantedCatalog(
+      (url, options) => win.fetch(url, { ...options, signal: controller.signal }),
+      NUI_WANTED_SOURCE_URL,
+    ).then(({ sources, cards }) => {
+      applyNuiWantedCatalog(cards);
+      try {
+        storage && storage.setItem(NUI_WANTED_CACHE_KEY, JSON.stringify({
+          schemaVersion: 1,
+          sources,
+          fetchedAt: Date.now(),
+        }));
+      } catch (_) {
+        // 캐시 저장에 실패해도 현재 목록은 사용할 수 있습니다.
+      }
+    }).catch((error) => {
+      state.nuiWantedError = error && error.message || '목록을 불러오지 못했습니다.';
+    }).finally(() => {
+      win.clearTimeout(timeout);
+      state.nuiWantedLoading = false;
+      wantedCatalogRequest = null;
+      renderApp();
+    });
+
+    return wantedCatalogRequest;
   }
 
   function allRecords() {
@@ -4421,7 +3276,7 @@
             >
               <strong>누이 구해요 이미지</strong>
               <span>
-                구해요 누이 ${formatNumber(NUI_WANTED_CATALOG.length)}종 중 원하는 누이를 선택
+                구해요 누이를 선택하고 PNG를 생성
               </span>
             </button>
           </div>
@@ -5660,17 +4515,17 @@
 
   function selectedNuiWantedCards() {
     return getSelectedNuiWantedCards(
-      NUI_WANTED_CATALOG,
+      state.nuiWantedCatalog,
       state.nuiWantedSelected,
     );
   }
 
   function visibleNuiWantedCards() {
-    return sortNuiImageItems(filterNuiWantedCatalog(
-      NUI_WANTED_CATALOG,
+    return filterNuiWantedCatalog(
+      state.nuiWantedSortedCatalog,
       state.nuiWantedQuery,
       state.nuiWantedCategory,
-    ));
+    );
   }
 
   function renderNuiWanted() {
@@ -5678,17 +4533,30 @@
       return renderNuiWantedPreview();
     }
 
+    if (!state.nuiWantedCatalog.length) {
+      return `
+        <div class="im2-empty">
+          ${state.nuiWantedLoading
+            ? '누이 구해요 목록을 불러오는 중입니다.'
+            : escapeHtml(state.nuiWantedError || '누이 구해요 목록을 아직 불러오지 않았습니다.')}
+          ${state.nuiWantedLoading ? '' : `
+            <button class="im2-btn" data-action="refresh-nui-wanted-catalog">
+              다시 불러오기
+            </button>
+          `}
+        </div>
+      `;
+    }
+
     const visible = visibleNuiWantedCards();
     const selected = selectedNuiWantedCards();
-    const categories = [...new Set(
-      NUI_WANTED_CATALOG.map((item) => item.category),
-    )].sort((a, b) => a.localeCompare(b, 'ko'));
+    const categories = state.nuiWantedCategories;
 
     return `
       <div class="im2-nui-stats">
         <span class="im2-status-chip">
           구해요 누이
-          <strong>${formatNumber(NUI_WANTED_CATALOG.length)}</strong>종
+          <strong>${formatNumber(state.nuiWantedCatalog.length)}</strong>종
         </span>
 
         <span class="im2-status-chip success">
@@ -5697,11 +4565,25 @@
         </span>
 
         <span class="im2-status-chip">
-          공개 관측 목록 + 시크릿 선택권 확인 · Secret 포함
+          GitHub 공개 목록 · 선택 결과는 이 브라우저에 저장
         </span>
       </div>
 
+      ${state.nuiWantedError ? `
+        <div class="im2-filter-note">
+          마지막 저장 목록을 표시합니다. 갱신 실패: ${escapeHtml(state.nuiWantedError)}
+        </div>
+      ` : ''}
+
       <div class="im2-toolbar">
+        <button
+          class="im2-btn"
+          data-action="refresh-nui-wanted-catalog"
+          ${state.nuiWantedLoading ? 'disabled' : ''}
+        >
+          ${state.nuiWantedLoading ? '목록 갱신 중' : '목록 업데이트'}
+        </button>
+
         <label class="im2-compact-toggle">
           <input
             type="checkbox"
@@ -8201,6 +7083,9 @@
 
       setMessage(null);
       renderApp();
+      if (state.view === 'nui-wanted' && !wantedCatalogRequested) {
+        refreshNuiWantedCatalog();
+      }
       return;
     }
 
@@ -8218,6 +7103,11 @@
 
     if (action === 'refresh') {
       refresh();
+      return;
+    }
+
+    if (action === 'refresh-nui-wanted-catalog') {
+      refreshNuiWantedCatalog();
       return;
     }
 
