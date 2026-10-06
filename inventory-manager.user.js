@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/neo5322/inventory-manager-userscript/issues
 // @updateURL    https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
-// @version      2.4.0
+// @version      2.5.0
 // @description  인벤토리 관리, 누이 이미지 페이지 분할·간략화 및 개별/ZIP 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
@@ -64,7 +64,7 @@
     gap: 18,
     columns: 4,
     tileHeight: 314,
-    compactTileHeight: 80,
+    compactTileHeight: 96,
     maxImageHeight: 4200,
     maxUnsplitHeight: 32000,
     sectionGap: 28,
@@ -938,17 +938,58 @@
     }
   }
 
-  function makeNuiRecords(records, savedStatuses) {
-    const statuses = savedStatuses || {};
+  function nuiDuplicateKey(item) {
+    const name = normalizeItemName(item.itemName).toLocaleLowerCase('ko');
+    const image = resolveImageUrl(item.imageUrl, 'https://prm.dothome.co.kr/');
+    return JSON.stringify([name, image]);
+  }
 
-    return (records || [])
+  function makeNuiRecords(records, savedStatuses, duplicateMode = false, starredKeys = []) {
+    const statuses = savedStatuses || {};
+    const starred = new Set(starredKeys);
+    const items = (records || [])
       .filter((record) => isNuiItemName(record.itemName))
       .map((record) => ({
         ...record,
         status: NUI_STATUS[statuses[record.key]]
           ? statuses[record.key]
           : 'unclassified',
+        starred: starred.has(nuiDuplicateKey(record)),
+        tradeQuantity: 0,
       }));
+
+    if (!duplicateMode) {
+      items.forEach((item) => {
+        item.tradeQuantity = item.status === 'available'
+          ? toQuantity(item.quantity) : 0;
+      });
+      return items;
+    }
+
+    const groups = new Map();
+    items.forEach((item) => {
+      const key = nuiDuplicateKey(item);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    });
+    groups.forEach((group) => {
+      if (group[0].starred) return;
+      const protectedCount = group
+        .filter((item) => item.status === 'unavailable')
+        .reduce((sum, item) => sum + toQuantity(item.quantity), 0);
+      let reserve = protectedCount ? 0 : 1;
+      const candidates = group.filter((item) => item.status !== 'unavailable')
+        .sort((left, right) =>
+          Number(left.status === 'available') - Number(right.status === 'available')
+          || String(left.key).localeCompare(String(right.key)));
+      candidates.forEach((item) => {
+        const quantity = toQuantity(item.quantity);
+        const kept = Math.min(quantity, reserve);
+        item.tradeQuantity = quantity - kept;
+        reserve -= kept;
+      });
+    });
+    return items;
   }
 
   function countStatuses(items) {
@@ -970,92 +1011,183 @@
   }
 
   function buildAutoOrganizePlan(snapshot, options) {
-    const protectedIds = new Set(
-      (options && options.protectedFolderIds) || [],
-    );
-
+    const protectedIds = new Set(((options && options.protectedFolderIds) || [])
+      .map(String));
     const priority = (options && options.typePriority) || [];
-    const counts = new Map();
-    const folderIdsByName = new Map();
-
-    (snapshot.folders || []).forEach((folder) => {
-      counts.set(
-        folder.name,
-        (counts.get(folder.name) || 0) + 1,
-      );
-
-      if (!folderIdsByName.has(folder.name)) {
-        folderIdsByName.set(
-          folder.name,
-          String(folder.id),
-        );
-      }
+    const rules = (options && options.itemRules) || {};
+    const overrides = (options && options.itemOverrides) || {};
+    const records = snapshot.records || [];
+    const root = records.filter((item) => String(item.folderId) === '0');
+    const folders = (snapshot.folders || []).filter((folder) =>
+      !protectedIds.has(String(folder.id)));
+    const folderById = new Map(folders.map((folder) => [String(folder.id), folder]));
+    const foldersByName = new Map();
+    folders.forEach((folder) => {
+      const matches = foldersByName.get(folder.name) || [];
+      matches.push(folder);
+      foldersByName.set(folder.name, matches);
     });
-
-    const buckets = new Map();
-    const skipped = [];
-
-    (snapshot.records || [])
-      .filter((item) => String(item.folderId) === '0')
-      .forEach((item) => {
-        const name = chooseType(item.types, priority);
-
-        if (!name) {
-          skipped.push({
-            itemId: item.itemId,
-            itemName: item.itemName,
-            reason: 'unclassified',
-          });
-          return;
-        }
-
-        if (counts.get(name) > 1) {
-          skipped.push({
-            itemId: item.itemId,
-            itemName: item.itemName,
-            reason: 'duplicate-folder',
-          });
-          return;
-        }
-
-        const existingId = folderIdsByName.get(name);
-
-        if (
-          existingId
-          && protectedIds.has(existingId)
-        ) {
-          skipped.push({
-            itemId: item.itemId,
-            itemName: item.itemName,
-            reason: 'protected-folder',
-          });
-          return;
-        }
-
-        if (!buckets.has(name)) {
-          buckets.set(name, []);
-        }
-
-        buckets
-          .get(name)
-          .push(String(item.itemId));
+    const existing = records.filter((item) => folderById.has(String(item.folderId)));
+    const normalized = (value) => normalizeItemName(value).toLocaleLowerCase('ko');
+    const exactFoldersByName = new Map();
+    const existingByType = new Map();
+    existing.forEach((item) => {
+      const name = normalized(item.itemName);
+      if (!exactFoldersByName.has(name)) exactFoldersByName.set(name, new Set());
+      exactFoldersByName.get(name).add(String(item.folderId));
+      (item.types || []).forEach((type) => {
+        if (!existingByType.has(type)) existingByType.set(type, new Set());
+        existingByType.get(type).add(item);
       });
-
+    });
+    const protectedNames = new Set(records
+      .filter((item) => protectedIds.has(String(item.folderId)))
+      .map((item) => normalized(item.itemName)));
+    const tokens = (value) => normalized(value)
+      .replace(/no\s*\.\s*\d+/gi, ' ')
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((token) => token.length >= 4);
+    const typeCounts = new Map();
+    root.forEach((item) => {
+      const type = chooseType(item.types, priority);
+      if (type) typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+    });
+    const decisions = root.map((item) => {
+      const itemId = String(item.itemId);
+      const itemName = item.itemName;
+      const explicit = Object.hasOwn(overrides, itemId)
+        ? overrides[itemId]
+        : rules[normalized(itemName)];
+      let target = '';
+      let suggestion = '';
+      let tier = 'stay';
+      let reason = '';
+      if (explicit === 'skip') {
+        reason = '직접 보류';
+      } else if (explicit) {
+        if (folderById.has(String(explicit))) {
+          target = String(explicit);
+          tier = 'ready';
+          reason = Object.hasOwn(overrides, itemId)
+            ? '이번 정리에서 지정' : '기억한 규칙';
+        } else if (String(explicit).startsWith('new:')) {
+          const name = String(explicit).slice(4);
+          const matches = foldersByName.get(name) || [];
+          if (matches.length === 1) target = String(matches[0].id);
+          else if (!(snapshot.folders || []).some((folder) => folder.name === name)) {
+            target = String(explicit);
+          }
+          if (target) {
+            tier = 'ready';
+            reason = '새 폴더를 직접 선택';
+          } else reason = '지정한 폴더가 없거나 보호됨';
+        } else {
+          reason = '지정한 폴더가 없거나 보호됨';
+        }
+      } else {
+        const protectedMatch = protectedNames.has(normalized(itemName));
+        const exact = exactFoldersByName.get(normalized(itemName)) || new Set();
+        const itemTokens = new Set(tokens(itemName));
+        const candidates = new Set((item.types || []).flatMap((type) =>
+          [...(existingByType.get(type) || [])]));
+        const similar = new Set([...candidates]
+          .filter((entry) => tokens(entry.itemName).some((token) => itemTokens.has(token)))
+          .map((entry) => String(entry.folderId)));
+        if (protectedMatch) {
+          reason = '같은 아이템이 보호 폴더에 있음';
+        } else if (exact.size === 1) {
+          target = [...exact][0];
+          tier = 'ready';
+          reason = '같은 아이템이 있는 폴더';
+        } else if (exact.size > 1) {
+          reason = '같은 아이템이 여러 폴더에 있음';
+        } else if (similar.size === 1) {
+          suggestion = [...similar][0];
+          tier = 'review';
+          reason = '같은 종류·이름 특징의 아이템';
+        } else if (similar.size > 1) {
+          reason = '비슷한 아이템이 여러 폴더에 있음';
+        } else {
+          const type = chooseType(item.types, priority);
+          const matches = foldersByName.get(type) || [];
+          if (!type) reason = '분류 정보 없음';
+          else if (matches.length === 1) {
+            suggestion = String(matches[0].id);
+            tier = 'review';
+            reason = '아이템 종류와 폴더 이름 일치';
+          } else if (matches.length > 1) {
+            reason = '같은 이름의 폴더가 여러 개';
+          } else if ((snapshot.folders || []).some((folder) => folder.name === type)) {
+            reason = '종류와 같은 이름의 보호 폴더';
+          } else if (typeCounts.get(type) >= 3) {
+            suggestion = `new:${type}`;
+            tier = 'review';
+            reason = '같은 종류의 폴더 밖 아이템이 3개 이상';
+          } else {
+            reason = '맞는 폴더를 찾지 못함';
+          }
+        }
+      }
+      return { itemId, itemName, target, suggestion, tier, reason };
+    });
+    const buckets = new Map();
+    decisions.filter((decision) => decision.target).forEach((decision) => {
+      if (!buckets.has(decision.target)) buckets.set(decision.target, []);
+      buckets.get(decision.target).push(decision.itemId);
+    });
+    const moves = [...buckets.entries()].map(([destination, itemIds]) => ({
+      destination,
+      folderName: destination.startsWith('new:')
+        ? destination.slice(4) : folderById.get(destination).name,
+      itemIds,
+    }));
     return {
       characterId: String(snapshot.characterId),
-      characterName:
-        snapshot.characterName
-        || String(snapshot.characterId),
-      createFolders: [...buckets.keys()]
-        .filter((name) => !counts.has(name)),
-      moves: [...buckets.entries()]
-        .map(([folderName, itemIds]) => ({
-          itemIds,
-          folderName,
-        })),
-      protectedFolderIds: [...protectedIds],
-      skipped,
+      characterName: snapshot.characterName || String(snapshot.characterId),
+      createFolders: moves.filter((move) => move.destination.startsWith('new:'))
+        .map((move) => move.folderName),
+      moves,
+      skipped: decisions.filter((decision) => !decision.target),
+      decisions,
     };
+  }
+
+  function getNuiTradeImageItems(items) {
+    const eligibleItems = (items || [])
+      .filter((item) => item.tradeQuantity > 0)
+      .map((item) => ({ ...item, quantity: item.tradeQuantity }));
+    return mergeNuiTradeImageItems(eligibleItems);
+  }
+
+  function mergeNuiTradeImageItems(items) {
+    const groups = new Map();
+    (items || []).forEach((item) => {
+      const key = nuiDuplicateKey(item);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          ...item,
+          key: `trade:${key}`,
+          quantity: 0,
+          characterNames: new Set(),
+          folderNames: new Set(),
+          ownerNames: new Set(),
+        });
+      }
+      const merged = groups.get(key);
+      merged.quantity += toQuantity(item.quantity);
+      if (item.characterName) merged.characterNames.add(item.characterName);
+      if (item.folderName) merged.folderNames.add(item.folderName);
+      if (item.ownerName) merged.ownerNames.add(item.ownerName);
+    });
+    return [...groups.values()].map((item) => ({
+      ...item,
+      characterName: [...item.characterNames].sort((a, b) => a.localeCompare(b, 'ko')).join(', '),
+      folderName: [...item.folderNames].sort((a, b) => a.localeCompare(b, 'ko')).join(', '),
+      ownerName: [...item.ownerNames].sort((a, b) => a.localeCompare(b, 'ko')).join(', '),
+      characterNames: [...item.characterNames].sort((a, b) => a.localeCompare(b, 'ko')),
+      folderNames: [...item.folderNames].sort((a, b) => a.localeCompare(b, 'ko')),
+      ownerNames: [...item.ownerNames].sort((a, b) => a.localeCompare(b, 'ko')),
+    }));
   }
 
   function createInventoryApi(fetchImpl, origin) {
@@ -1239,6 +1371,9 @@
       countExchangeTickets,
       isNuiItemName,
       makeNuiRecords,
+      nuiDuplicateKey,
+      getNuiTradeImageItems,
+      mergeNuiTradeImageItems,
       countStatuses,
       buildAutoOrganizePlan,
       createInventoryApi,
@@ -1354,6 +1489,9 @@
       || oldManager.typePriority
       || [],
 
+    organizeRules: currentSaved.organizeRules || {},
+    organizeOverrides: {},
+
     organizePlans: null,
     dialog: null,
 
@@ -1368,6 +1506,9 @@
       currentSaved.nuiStatuses
       || oldNuiStatuses
       || {},
+    nuiDuplicateMode: Boolean(currentSaved.nuiDuplicateMode),
+    nuiStarred: new Set(Array.isArray(currentSaved.nuiStarred)
+      ? currentSaved.nuiStarred : []),
 
     nuiSelected: new Set(),
     nuiQuery: '',
@@ -1448,11 +1589,18 @@
           typePriority:
             state.typePriority,
 
+          organizeRules:
+            state.organizeRules,
+
           theme:
             state.theme,
 
           nuiStatuses:
             state.nuiStatuses,
+          nuiDuplicateMode:
+            state.nuiDuplicateMode,
+          nuiStarred:
+            [...state.nuiStarred],
 
           nuiWantedSelected:
             [...state.nuiWantedSelected],
@@ -2432,6 +2580,56 @@
         font-size:11px
       }
 
+      .im2-plan-group{
+        margin-top:10px;
+        border-top:1px solid var(--border)
+      }
+
+      .im2-plan-group summary{
+        padding:10px 0;
+        cursor:pointer;
+        font-weight:600
+      }
+
+      .im2-plan-destination{
+        padding:8px 0 4px;
+        font-size:11px
+      }
+
+      .im2-plan-destination button{
+        float:right;
+        padding:4px 8px;
+        font-size:11px
+      }
+
+      .im2-plan-item{
+        display:grid;
+        grid-template-columns:minmax(0,1fr) minmax(160px,190px);
+        align-items:center;
+        gap:12px;
+        padding:8px 0 8px 12px;
+        border-top:1px solid var(--border);
+        font-size:11px
+      }
+
+      .im2-plan-item-controls{
+        display:grid;
+        gap:5px;
+        min-width:0
+      }
+
+      .im2-plan-item-controls select{
+        width:100%;min-width:0
+      }
+
+      .im2-plan-item-controls label{
+        display:flex;align-items:center;gap:5px
+      }
+
+      @media(max-width:650px){
+        .im2-plan-item{grid-template-columns:minmax(0,1fr)}
+      }
+
       .im2-nui-stats{
         display:flex;
         flex-wrap:wrap;
@@ -2478,6 +2676,35 @@
       .im2-nui-row.is-selected{
         border-color:var(--accent);
         background:var(--accent-soft)
+      }
+
+      .im2-nui-name-line{
+        display:flex;
+        align-items:center;
+        gap:6px;
+        min-width:0
+      }
+
+      .im2-nui-star{
+        flex:none;
+        width:24px;
+        height:24px;
+        padding:0;
+        border:0;
+        background:transparent;
+        color:var(--muted);
+        cursor:pointer;
+        font-size:20px
+      }
+
+      .im2-nui-star[aria-pressed="true"]{
+        color:#d18b16
+      }
+
+      .im2-toolbar [data-action="toggle-nui-duplicate-mode"][aria-pressed="true"]{
+        border-color:var(--success);
+        color:var(--success);
+        background:var(--success-soft)
       }
 
       .im2-thumb{
@@ -2899,7 +3126,7 @@
       ],
       organize: [
         '자동 정리',
-        '폴더 밖 아이템을 종류에 따라 안전하게 정리합니다.',
+        '아이템 내용과 기존 폴더를 살펴 목적지를 제안합니다.',
       ],
       nui: [
         '누이 교환',
@@ -2929,6 +3156,12 @@
 
     const active =
       doc.activeElement;
+    const oldContent = overlay.querySelector('.im2-content');
+    const contentScroll = oldContent ? oldContent.scrollTop : 0;
+    const oldGroups = overlay.querySelectorAll('[data-plan-group]');
+    const openGroups = new Set([...oldGroups]
+      .filter((group) => group.open)
+      .map((group) => group.dataset.planGroup));
 
     const focusKey =
       active
@@ -3074,6 +3307,14 @@
         </div>
       </div>
     `;
+
+    const newContent = overlay.querySelector('.im2-content');
+    if (newContent) newContent.scrollTop = contentScroll;
+    if (oldGroups.length) {
+      overlay.querySelectorAll('[data-plan-group]').forEach((group) => {
+        group.open = openGroups.has(group.dataset.planGroup);
+      });
+    }
 
     if (focusKey) {
       const target =
@@ -3801,11 +4042,10 @@
               0,
             ),
 
-            skips: plans.reduce(
-              (n, p) =>
-                n + p.skipped.length,
-              0,
-            ),
+            review: plans.reduce((n, p) => n + p.decisions.filter(
+              (decision) => decision.tier === 'review').length, 0),
+            stays: plans.reduce((n, p) => n + p.decisions.filter(
+              (decision) => decision.tier === 'stay').length, 0),
           }
         : null;
 
@@ -3842,8 +4082,8 @@
               >
 
               <div class="im2-help">
-                여러 종류가 붙은 아이템에서 먼저 적용할 종류를
-                쉼표로 구분합니다. 비우면 서버의 첫 분류를 사용합니다.
+                기존 폴더와 직접 지정한 규칙으로 판단할 수 없을 때
+                사용할 종류 순서입니다. 쉼표로 구분합니다.
               </div>
             </div>
 
@@ -3934,7 +4174,7 @@
               </div>
 
               <div class="im2-section-desc">
-                실제 변경 전에 생성·이동·제외 항목을 확인합니다.
+                확실한 이동만 기본 선택합니다. 나머지는 확인 후 추가할 수 있습니다.
               </div>
             </div>
           </div>
@@ -3952,16 +4192,23 @@
                     </div>
 
                     <div class="im2-plan-stat">
-                      <span>아이템 이동</span>
+                      <span>이동 예정</span>
                       <strong>
                         ${formatNumber(totals.moves)}
                       </strong>
                     </div>
 
                     <div class="im2-plan-stat">
-                      <span>제외</span>
+                      <span>확인 필요</span>
                       <strong>
-                        ${formatNumber(totals.skips)}
+                        ${formatNumber(totals.review)}
+                      </strong>
+                    </div>
+
+                    <div class="im2-plan-stat">
+                      <span>그대로 두기</span>
+                      <strong>
+                        ${formatNumber(totals.stays)}
                       </strong>
                     </div>
                   </div>
@@ -3994,78 +4241,107 @@
   }
 
   function renderPlanCharacter(plan) {
-    const moveCount =
-      plan.moves.reduce(
-        (n, move) =>
-          n + move.itemIds.length,
-        0,
-      );
-
+    const snapshot = snapshotFor(plan.characterId);
+    const folders = (snapshot && snapshot.folders || []).filter((folder) =>
+      !(state.protectedFolders[plan.characterId] || []).includes(String(folder.id)));
+    const folderNameCounts = new Map();
+    folders.forEach((folder) => folderNameCounts.set(folder.name,
+      (folderNameCounts.get(folder.name) || 0) + 1));
+    const folderLabel = (folder) => folderNameCounts.get(folder.name) > 1
+      ? `${folder.name} (ID ${folder.id})` : folder.name;
+    const destinationName = (value) => value.startsWith('new:')
+      ? `${value.slice(4)} (새 폴더)`
+      : (() => {
+        const folder = folders.find((entry) => String(entry.id) === value);
+        return folder ? folderLabel(folder) : '목적지 없음';
+      })();
+    const renderDecision = (decision) => {
+      const rule = (state.organizeRules[plan.characterId] || {})[
+        normalizeItemName(decision.itemName).toLocaleLowerCase('ko')];
+      const selected = decision.target || (decision.reason === '직접 보류' ? 'skip' : 'auto');
+      const remembered = rule && (rule === (decision.target || 'skip')
+        || (String(rule).startsWith('new:') && decision.target
+          && destinationName(decision.target) === String(rule).slice(4)));
+      const newDestination = [decision.target, decision.suggestion]
+        .find((value) => value.startsWith('new:'));
+      return `
+        <div class="im2-plan-item">
+          <div><strong>${escapeHtml(decision.itemName)}</strong>
+            <span class="im2-help"> · ${escapeHtml(decision.reason)}</span></div>
+          <div class="im2-plan-item-controls">
+            <select class="im2-input" aria-label="${escapeHtml(decision.itemName)} 목적지"
+              data-input="organize-destination"
+              data-character="${escapeHtml(plan.characterId)}"
+              data-item="${escapeHtml(decision.itemId)}">
+              <option value="auto" ${selected === 'auto' ? 'selected' : ''}>자동 판단</option>
+              <option value="skip" ${selected === 'skip' ? 'selected' : ''}>이동하지 않음</option>
+              ${folders.map((folder) => `
+                <option value="${escapeHtml(folder.id)}"
+                  ${selected === String(folder.id) ? 'selected' : ''}>
+                  ${escapeHtml(folderLabel(folder))}
+                </option>`).join('')}
+              ${newDestination ? `<option value="${escapeHtml(newDestination)}"
+                ${selected === newDestination ? 'selected' : ''}>
+                ${escapeHtml(destinationName(newDestination))}</option>` : ''}
+            </select>
+            <label class="im2-help">
+              <input type="checkbox" data-input="organize-remember"
+                data-character="${escapeHtml(plan.characterId)}"
+                data-item="${escapeHtml(decision.itemId)}"
+                ${remembered ? 'checked' : ''}
+                ${selected === 'auto' ? 'disabled' : ''}>
+              앞으로 같은 이름에도 적용
+            </label>
+            ${rule && !remembered ? `<span class="im2-help">
+              이번만 변경 · 기억한 규칙은 ${escapeHtml(rule === 'skip'
+                ? '이동하지 않음' : destinationName(String(rule)))}
+            </span>` : ''}
+          </div>
+        </div>`;
+    };
+    const renderGroup = (title, decisions, key, open = false) => {
+      if (!decisions.length) return '';
+      const byDestination = new Map();
+      decisions.forEach((decision) => {
+        const destination = decision.target || decision.suggestion || '';
+        if (!byDestination.has(destination)) byDestination.set(destination, []);
+        byDestination.get(destination).push(decision);
+      });
+      return `
+        <details class="im2-plan-group" data-plan-group="${escapeHtml(plan.characterId + ':' + key)}"
+          ${open ? 'open' : ''}>
+          <summary>${title} · ${formatNumber(decisions.length)}</summary>
+          ${[...byDestination.entries()].map(([destination, items]) => `
+            <div class="im2-plan-destination">
+              <strong>${destination ? escapeHtml(destinationName(destination)) : '목적지 미정'}</strong>
+              <span class="im2-help"> · ${formatNumber(items.length)}개</span>
+              ${key === 'review' && destination ? `
+                <button class="im2-btn" type="button"
+                  data-action="accept-organize-suggestions"
+                  data-character="${escapeHtml(plan.characterId)}"
+                  data-destination="${escapeHtml(destination)}">
+                  추천 모두 선택
+                </button>` : ''}
+            </div>
+            ${items.map(renderDecision).join('')}
+          `).join('')}
+        </details>`;
+    };
     return `
       <div class="im2-plan-char">
-        <strong>
-          ${escapeHtml(plan.characterName)}
-        </strong>
-
-        <div class="im2-help">
-          새 폴더 ${formatNumber(plan.createFolders.length)}
-          · 이동 ${formatNumber(moveCount)}
-          · 제외 ${formatNumber(plan.skipped.length)}
-        </div>
-
-        ${
-          plan.createFolders.length
-            ? `
-              <ul class="im2-plan-list">
-                <li>
-                  생성:
-                  ${plan.createFolders.map(escapeHtml).join(', ')}
-                </li>
-              </ul>
-            `
-            : ''
-        }
-
-        ${
-          plan.moves.length
-            ? `
-              <ul class="im2-plan-list">
-                ${plan.moves
-                  .map(
-                    (move) => `
-                      <li>
-                        ${escapeHtml(move.folderName)} 폴더로
-                        ${formatNumber(move.itemIds.length)}개 이동
-                      </li>
-                    `,
-                  )
-                  .join('')}
-              </ul>
-            `
-            : ''
-        }
-
-        ${
-          plan.skipped.length
-            ? `
-              <div
-                class="im2-help"
-                style="margin-top:7px"
-              >
-                제외 ${formatNumber(plan.skipped.length)}개 ·
-                보호 폴더, 중복 폴더, 미분류 항목
-              </div>
-            `
-            : ''
-        }
-      </div>
-    `;
+        <strong>${escapeHtml(plan.characterName)}</strong>
+        ${renderGroup('이동 예정', plan.decisions.filter((d) => d.tier === 'ready'), 'ready')}
+        ${renderGroup('확인 필요', plan.decisions.filter((d) => d.tier === 'review'), 'review', true)}
+        ${renderGroup('그대로 두기', plan.decisions.filter((d) => d.tier === 'stay'), 'stay')}
+      </div>`;
   }
 
   function currentNuiRecords() {
     return makeNuiRecords(
       allRecords(),
       state.nuiStatuses,
+      state.nuiDuplicateMode,
+      state.nuiStarred,
     );
   }
 
@@ -4079,7 +4355,10 @@
         .filter((item) => {
         if (
           state.nuiFilter !== 'all'
-          && item.status !== state.nuiFilter
+          && (state.nuiDuplicateMode
+            ? (item.tradeQuantity > 0 ? 'available'
+              : item.status === 'unavailable' ? 'unavailable' : 'unclassified')
+            : item.status) !== state.nuiFilter
         ) {
           return false;
         }
@@ -4108,6 +4387,10 @@
 
     const counts =
       countStatuses(records);
+    const tradeCopies = records.reduce((sum, item) =>
+      sum + item.tradeQuantity, 0);
+    const starredKinds = new Set(records.filter((item) => item.starred)
+      .map(nuiDuplicateKey)).size;
 
     const tickets =
       countExchangeTickets(allRecords());
@@ -4122,21 +4405,32 @@
 
         <span class="im2-status-chip success">
           교환 가능
-          <strong>${formatNumber(counts.available)}</strong>
+          <strong>${formatNumber(state.nuiDuplicateMode ? tradeCopies : counts.available)}</strong>
         </span>
 
         <span class="im2-status-chip danger">
-          교환 불가
+          ${state.nuiDuplicateMode ? '전량 보관' : '교환 불가'}
           <strong>${formatNumber(counts.unavailable)}</strong>
         </span>
 
         <span class="im2-status-chip warning">
-          미분류
+          ${state.nuiDuplicateMode ? '기본 상태' : '미분류'}
           <strong>${formatNumber(counts.unclassified)}</strong>
+        </span>
+
+        <span class="im2-status-chip">
+          별표 보관 <strong>${formatNumber(starredKinds)}</strong>종
         </span>
       </div>
 
       <div class="im2-toolbar">
+        <button class="im2-btn" type="button"
+          data-action="toggle-nui-duplicate-mode"
+          aria-pressed="${state.nuiDuplicateMode}"
+          ${records.length || state.nuiDuplicateMode ? '' : 'disabled'}>
+          ${state.nuiDuplicateMode ? '중복 자동 설정 끄기' : '중복 자동 설정'}
+        </button>
+
         <label class="im2-compact-toggle">
           <input
             type="checkbox"
@@ -4181,21 +4475,21 @@
             value="unclassified"
             ${state.nuiFilter === 'unclassified' ? 'selected' : ''}
           >
-            미분류
+            ${state.nuiDuplicateMode ? '교환 가능 수량 없음' : '미분류'}
           </option>
 
           <option
             value="available"
             ${state.nuiFilter === 'available' ? 'selected' : ''}
           >
-            교환 가능
+            ${state.nuiDuplicateMode ? '교환 가능 수량 있음' : '교환 가능'}
           </option>
 
           <option
             value="unavailable"
             ${state.nuiFilter === 'unavailable' ? 'selected' : ''}
           >
-            교환 불가
+            ${state.nuiDuplicateMode ? '전량 보관' : '교환 불가'}
           </option>
         </select>
 
@@ -4209,7 +4503,7 @@
         <button
           class="im2-btn primary"
           data-action="make-nui-image"
-          ${counts.available ? '' : 'disabled'}
+          ${tradeCopies ? '' : 'disabled'}
         >
           PNG 미리보기
         </button>
@@ -4236,8 +4530,9 @@
         ${formatNumber(visible.length)}개 표시 ·
         ${formatNumber(state.nuiSelected.size)}개 선택 ·
         자동 정렬: 누이 종류 → No. 숫자 → 캐릭터 별칭
+        ${state.nuiDuplicateMode ? ' · 전체 캐릭터 기준 1개 보관 · 전량 보관 항목 제외' : ''}
         ${
-          counts.unclassified
+          counts.unclassified && !state.nuiDuplicateMode
             ? ` · 미분류 ${formatNumber(counts.unclassified)}개는 PNG에서 제외됩니다.`
             : ''
         }
@@ -4268,7 +4563,7 @@
                 data-action="mark-nui"
                 data-status="available"
               >
-                교환 가능
+                ${state.nuiDuplicateMode ? '교환 우선' : '교환 가능'}
               </button>
 
               <button
@@ -4276,7 +4571,7 @@
                 data-action="mark-nui"
                 data-status="unavailable"
               >
-                교환 불가
+                ${state.nuiDuplicateMode ? '전량 보관' : '교환 불가'}
               </button>
 
               <button
@@ -4332,8 +4627,17 @@
         ${image}
 
         <div>
-          <div class="im2-item-name">
-            ${escapeHtml(item.itemName)}
+          <div class="im2-nui-name-line">
+            <button class="im2-nui-star" type="button"
+              data-action="toggle-nui-star" data-key="${encodeKey(item.key)}"
+              aria-pressed="${item.starred}"
+              aria-label="${item.starred ? '소장 예외 해제' : '소장 예외 표시'}"
+              title="${item.starred ? '소장 예외 해제' : '모든 캐릭터의 동일 누이 전량 보관'}">
+              ${item.starred ? '★' : '☆'}
+            </button>
+            <div class="im2-item-name">
+              ${escapeHtml(item.itemName)}
+            </div>
           </div>
 
           <div class="im2-item-sub">
@@ -4344,6 +4648,9 @@
               ${escapeHtml(grade.label)}
             </span>
             · ×${formatNumber(item.quantity)}
+            ${state.nuiDuplicateMode ? item.starred
+              ? ' · 별표 보관'
+              : ` · 교환 가능 ×${formatNumber(item.tradeQuantity)}` : ''}
           </div>
         </div>
 
@@ -4358,7 +4665,7 @@
             data-key="${encodeKey(item.key)}"
             data-status="available"
           >
-            가능
+            ${state.nuiDuplicateMode ? '교환 우선' : '가능'}
           </button>
 
           <button
@@ -4371,7 +4678,7 @@
             data-key="${encodeKey(item.key)}"
             data-status="unavailable"
           >
-            불가
+            ${state.nuiDuplicateMode ? '전량 보관' : '불가'}
           </button>
 
           <button
@@ -4384,7 +4691,7 @@
             data-key="${encodeKey(item.key)}"
             data-status="unclassified"
           >
-            미분류
+            ${state.nuiDuplicateMode ? '기본' : '미분류'}
           </button>
         </div>
       </div>
@@ -4395,10 +4702,7 @@
     const preview = state.preview;
     const availableCount =
       currentNuiRecords()
-        .filter(
-          (item) =>
-            item.status === 'available',
-        ).length;
+        .reduce((sum, item) => sum + item.tradeQuantity, 0);
 
     return `
       <div class="im2-preview">
@@ -5730,6 +6034,7 @@
 
     state.organizePlans =
       null;
+    state.organizeOverrides = {};
 
     const summary =
       summarizeSnapshots(snapshots);
@@ -5822,6 +6127,8 @@
 
                 typePriority:
                   state.typePriority,
+                itemRules: state.organizeRules[snapshot.characterId] || {},
+                itemOverrides: state.organizeOverrides[snapshot.characterId] || {},
               },
             ),
         );
@@ -5843,6 +6150,7 @@
     renderApp();
 
     const results = [];
+    const prepared = [];
 
     for (const oldPlan of planned) {
       try {
@@ -5907,9 +6215,37 @@
 
               typePriority:
                 state.typePriority,
+              itemRules: state.organizeRules[oldPlan.characterId] || {},
+              itemOverrides: state.organizeOverrides[oldPlan.characterId] || {},
             },
           );
 
+        const signature = (entry) => JSON.stringify((entry.decisions || [])
+          .map((decision) => [decision.itemId, decision.target, decision.suggestion, decision.tier])
+          .sort((left, right) => left[0].localeCompare(right[0])));
+        const destinations = (entry) => JSON.stringify(entry.moves.map((move) =>
+          [move.destination, move.folderName]).sort((left, right) => left[0].localeCompare(right[0])));
+        if (signature(plan) !== signature(oldPlan)
+          || destinations(plan) !== destinations(oldPlan)) {
+          throw new Error('인벤토리 또는 폴더가 바뀌었습니다. 미리보기를 다시 만드세요.');
+        }
+
+        prepared.push({ plan, meta });
+      } catch (error) {
+        results.push(`${oldPlan.characterName || oldPlan.characterId} 확인 실패: ${
+          error && error.message || '오류'}`);
+      }
+    }
+
+    if (results.length) {
+      state.busy = false;
+      setMessage(results.join(' / '), 'error');
+      renderApp();
+      return;
+    }
+
+    for (const { plan, meta } of prepared) {
+      try {
         for (const name of plan.createFolders) {
           await api.createFolder(
             plan.characterId,
@@ -5926,25 +6262,17 @@
           (resolvedData.folders || [])
             .map(normalizeFolder);
 
-        const idsByName =
-          new Map(
-            resolvedFolders.map(
-              (folder) => [
-                folder.name,
-                folder.id,
-              ],
-            ),
-          );
-
         for (const move of plan.moves) {
-          const folderId =
-            idsByName.get(
-              move.folderName,
-            );
+          const matchingFolders = resolvedFolders.filter((folder) =>
+            move.destination.startsWith('new:')
+              ? folder.name === move.folderName
+              : String(folder.id) === move.destination && folder.name === move.folderName);
+          const folderId = matchingFolders.length === 1
+            ? String(matchingFolders[0].id) : '';
 
           if (!folderId) {
             throw new Error(
-              `대상 폴더를 찾지 못했습니다: ${move.folderName}`,
+              `대상 폴더가 없거나 중복됩니다: ${move.folderName}`,
             );
           }
 
@@ -5961,8 +6289,7 @@
       } catch (error) {
         results.push(
           `${
-            oldPlan.characterName
-            || oldPlan.characterId
+            meta.characterName
           } 실패: ${
             error && error.message
             || '오류'
@@ -6433,7 +6760,7 @@
     ctx.fillText(
       `${mode === 'wanted'
         ? `생성 ${formatDate(new Date())} · 구하는 누이 ${formatNumber(items.length)}개`
-        : `생성 ${formatDate(new Date())} · 누이 종류 ${groups.length}개 · 아이템 ${formatNumber(items.length)}개`
+        : `생성 ${formatDate(new Date())} · 누이 종류 ${groups.length}개 · 교환 가능 ${formatNumber(items.reduce((sum, item) => sum + toQuantity(item.quantity), 0))}개`
       } · 페이지 ${pageIndex + 1}/${pageCount}`,
       CANVAS.margin,
       119,
@@ -6480,7 +6807,7 @@
               group.ownerName
                 ? `오너 · ${group.ownerName} · `
                 : ''
-            }교환 가능 ${formatNumber(group.items.length)}개`,
+            }교환 가능 ${formatNumber(group.items.reduce((sum, item) => sum + toQuantity(item.quantity), 0))}개`,
         CANVAS.margin,
         y + 55,
       );
@@ -6543,7 +6870,7 @@
             ctx.fillText(
               getNuiTypeLabel(item),
               x + 11,
-              tileY + 22,
+              tileY + 17,
             );
 
             ctx.fillStyle = palette.body;
@@ -6552,11 +6879,39 @@
               ctx,
               item.itemName,
               x + 11,
-              tileY + 44,
+              tileY + 37,
               tileWidth - 22,
-              14,
+              13,
               2,
             );
+
+            if (mode === 'trade') {
+              const holderNames = item.characterNames && item.characterNames.length
+                ? item.characterNames.join(', ')
+                : item.characterName;
+
+              ctx.fillStyle = palette.muted;
+              ctx.font = '600 9px "Noto Sans KR", sans-serif';
+              drawWrappedText(
+                ctx,
+                `보유: ${holderNames}`,
+                x + 11,
+                tileY + 72,
+                tileWidth - 70,
+                10,
+                1,
+              );
+
+              ctx.fillStyle = palette.quantity;
+              ctx.font = '900 11px "Noto Sans KR", sans-serif';
+              ctx.textAlign = 'right';
+              ctx.fillText(
+                `×${formatNumber(item.quantity)}`,
+                x + tileWidth - 11,
+                tileY + 72,
+              );
+              ctx.textAlign = 'left';
+            }
             return;
           }
 
@@ -6701,20 +7056,29 @@
           ctx.font =
             '600 11px "Noto Sans KR", sans-serif';
 
-          ctx.fillText(
-            mode === 'wanted'
-              ? '구함'
-              : `보유: ${item.characterName}`,
+          const holderNames = item.characterNames && item.characterNames.length
+            ? item.characterNames.join(', ')
+            : item.characterName;
+          const metadataY = drawWrappedText(
+            ctx,
+            mode === 'wanted' ? '구함' : `보유: ${holderNames}`,
             x + 14,
-            tileY + 193,
+            tileY + 190,
+            tileWidth - 28,
+            12,
+            2,
           );
 
-          ctx.fillText(
+          drawWrappedText(
+            ctx,
             mode === 'wanted'
               ? `분류: ${item.folderName}`
               : `폴더: ${item.folderName}`,
             x + 14,
-            tileY + 211,
+            metadataY + 3,
+            tileWidth - 28,
+            12,
+            1,
           );
 
           ctx.fillStyle =
@@ -6726,7 +7090,7 @@
           ctx.fillText(
             grade.label,
             x + 14,
-            tileY + 229,
+            metadataY + 21,
           );
 
           ctx.fillStyle =
@@ -6739,7 +7103,7 @@
             ctx,
             item.itemName,
             x + 14,
-            tileY + 250,
+            metadataY + 42,
             tileWidth - 88,
             16,
             2,
@@ -6759,7 +7123,7 @@
               ? '구해요'
               : `×${formatNumber(item.quantity)}`,
             x + tileWidth - 14,
-            tileY + 270,
+            metadataY + 70,
           );
 
           ctx.textAlign =
@@ -6925,11 +7289,7 @@
 
   async function makeNuiImage() {
     const available = sortNuiImageItems(
-      currentNuiRecords()
-        .filter(
-          (item) =>
-            item.status === 'available',
-        ),
+      getNuiTradeImageItems(currentNuiRecords()),
     );
 
     if (!available.length || state.busy) return;
@@ -7056,7 +7416,7 @@
     const details =
       target.closest('details');
 
-    if (details) {
+    if (details && !details.dataset.planGroup) {
       details.removeAttribute('open');
     }
   }
@@ -7657,6 +8017,21 @@
       return;
     }
 
+    if (action === 'accept-organize-suggestions') {
+      const charId = target.dataset.character;
+      const destination = target.dataset.destination;
+      const plan = (state.organizePlans || []).find((entry) => entry.characterId === charId);
+      if (!plan) return;
+      state.organizeOverrides[charId] = state.organizeOverrides[charId] || {};
+      plan.decisions.filter((decision) =>
+        decision.tier === 'review' && decision.suggestion === destination)
+        .forEach((decision) => {
+          state.organizeOverrides[charId][decision.itemId] = destination;
+        });
+      planOrganize();
+      return;
+    }
+
     if (action === 'plan-organize') {
       planOrganize();
       return;
@@ -7764,6 +8139,31 @@
 
     if (action === 'clear-nui-selection') {
       state.nuiSelected.clear();
+      renderApp();
+      return;
+    }
+
+    if (action === 'toggle-nui-duplicate-mode') {
+      state.nuiDuplicateMode = !state.nuiDuplicateMode;
+      persistSettings();
+      if (state.nuiDuplicateMode) {
+        const records = currentNuiRecords();
+        const copies = records.reduce((sum, item) => sum + item.tradeQuantity, 0);
+        setMessage(`중복 자동 설정 적용 · 전체 캐릭터에서 1개씩 보관 · 교환 가능 ${formatNumber(copies)}개`, 'success');
+      } else {
+        setMessage('중복 자동 설정을 해제했습니다.', 'info');
+      }
+      renderApp();
+      return;
+    }
+
+    if (action === 'toggle-nui-star') {
+      const record = allRecords().find((item) => item.key === decodeKey(target.dataset.key));
+      if (!record) return;
+      const key = nuiDuplicateKey(record);
+      if (state.nuiStarred.has(key)) state.nuiStarred.delete(key);
+      else state.nuiStarred.add(key);
+      persistSettings();
       renderApp();
       return;
     }
@@ -7997,6 +8397,35 @@
       !target
       || !target.dataset.input
     ) {
+      return;
+    }
+
+    if (target.dataset.input === 'organize-destination'
+      || target.dataset.input === 'organize-remember') {
+      const charId = target.dataset.character;
+      const plan = (state.organizePlans || []).find((entry) => entry.characterId === charId);
+      const decision = plan && plan.decisions.find((entry) => entry.itemId === target.dataset.item);
+      if (!decision) return;
+      state.organizeRules[charId] = state.organizeRules[charId] || {};
+      state.organizeOverrides[charId] = state.organizeOverrides[charId] || {};
+      const key = normalizeItemName(decision.itemName).toLocaleLowerCase('ko');
+      if (target.dataset.input === 'organize-destination') {
+        if (target.value === 'auto') {
+          delete state.organizeOverrides[charId][decision.itemId];
+          delete state.organizeRules[charId][key];
+        } else {
+          state.organizeOverrides[charId][decision.itemId] = target.value;
+        }
+      } else {
+        const value = decision.target || 'skip';
+        if (target.checked) state.organizeRules[charId][key] = value;
+        else {
+          delete state.organizeRules[charId][key];
+          state.organizeOverrides[charId][decision.itemId] = value;
+        }
+      }
+      persistSettings();
+      planOrganize();
       return;
     }
 
