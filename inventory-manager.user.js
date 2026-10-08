@@ -9,7 +9,9 @@
 // @description  인벤토리 관리, 누이 이미지 페이지 분할·간략화 및 개별/ZIP 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_info
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
 // ==/UserScript==
 
 (function () {
@@ -925,6 +927,18 @@
     return match ? match[1] : '';
   }
 
+  function getInstalledUserscriptVersion() {
+    try {
+      return typeof GM_info !== 'undefined'
+        && GM_info
+        && GM_info.script
+        ? String(GM_info.script.version || '').trim()
+        : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   function requestLatestUserscriptVersion(requestImpl, url) {
     if (typeof requestImpl !== 'function') {
       return Promise.reject(new Error('Tampermonkey 업데이트 요청 기능을 사용할 수 없습니다.'));
@@ -1020,8 +1034,8 @@
     const info = updateInfo || {};
     const installed = escapeMarkup(info.installedVersion || '확인 불가');
     const button = info.status === 'checking'
-      ? '<button class="im2-button" type="button" disabled>업데이트 확인 중…</button>'
-      : '<button class="im2-button" type="button" data-action="check-script-update">업데이트 확인</button>';
+      ? '<button class="im2-btn" type="button" disabled>업데이트 확인 중…</button>'
+      : '<button class="im2-btn" type="button" data-action="check-script-update">업데이트 확인</button>';
     let message = `현재 설치 버전 ${installed}`;
     let installLink = '';
     if (info.status === 'checking') {
@@ -1031,7 +1045,7 @@
     } else if (info.status === 'available') {
       const latest = escapeMarkup(info.latestVersion || '새 버전');
       message += ` · ${latest} 업데이트를 사용할 수 있습니다.`;
-      installLink = `<a class="im2-button im2-button-primary" href="${USERSCRIPT_UPDATE_URL}" target="_blank" rel="noopener">업데이트 설치</a>`;
+      installLink = `<a class="im2-btn primary" href="${USERSCRIPT_UPDATE_URL}" target="_blank" rel="noopener">업데이트 설치</a>`;
     } else if (info.status === 'error') {
       message += ` · 확인 실패: ${escapeMarkup(info.error || '잠시 후 다시 시도해 주세요.')}`;
     } else {
@@ -1043,13 +1057,13 @@
   const TRACKED_QUANTITY_ITEMS = [
     {
       key: 'pumpkin-bronze-trophy',
-      label: '호박 동상 트로핖',
-      aliases: ['호박 동상 트로핖', '호박 동상 트로피'],
+      label: '호박 동상 트로핗',
+      aliases: ['호박 동상 트로핗', '호박 동상 트로핖', '호박 동상 트로피'],
     },
     {
       key: 'ghost-silver-trophy',
-      label: '유령 은상 트로핖',
-      aliases: ['유령 은상 트로핖', '유령 은상 트로피'],
+      label: '유령 은상 트로핗',
+      aliases: ['유령 은상 트로핗', '유령 은상 트로핖', '유령 은상 트로피'],
     },
     {
       key: 'sacrifice-ticket',
@@ -1066,11 +1080,17 @@
   function summarizeTrackedItemQuantities(snapshots) {
     const list = Array.isArray(snapshots) ? snapshots : [];
     const successful = list.filter((snapshot) => snapshot && !snapshot.error);
-    const errors = list.filter((snapshot) => snapshot && snapshot.error).map((snapshot) => ({
-      characterId: String(snapshot.characterId ?? ''),
-      characterName: String(snapshot.characterName || snapshot.characterId || '캐릭터'),
-      error: String(snapshot.error),
-    }));
+    const errors = list.filter((snapshot) => snapshot && snapshot.error).map((snapshot) => {
+      const characterId = String(snapshot.characterId ?? '');
+      const characterName = String(snapshot.characterName || snapshot.characterId || '캐릭터');
+      const rawError = String(snapshot.error);
+      const prefix = `${characterName}: `;
+      return {
+        characterId,
+        characterName,
+        error: rawError.startsWith(prefix) ? rawError.slice(prefix.length) : rawError,
+      };
+    });
     const byItem = new Map(TRACKED_QUANTITY_ITEMS.map((item) => [item.key, new Map()]));
 
     successful.forEach((snapshot) => {
@@ -1631,6 +1651,9 @@
   const STORAGE_KEY =
     'manosaba-inventory-manager:v2';
 
+  const UPDATE_CHECK_STORAGE_KEY =
+    'manosaba-inventory-manager:update-check:v1';
+
   const OLD_MANAGER_KEY =
     'manosaba-inventory-manager:v1';
 
@@ -1700,6 +1723,12 @@
     loading: false,
     loadingProgress: null,
     message: null,
+    updateInfo: {
+      status: 'idle',
+      installedVersion: getInstalledUserscriptVersion(),
+      latestVersion: '',
+      error: '',
+    },
     lastFetchedAt: null,
     selectedKeys: new Set(),
     query: '',
@@ -1768,6 +1797,13 @@
     preview: null,
     busy: false,
   };
+
+  let lastUpdateCheckAt = 0;
+  try {
+    lastUpdateCheckAt = Number(storage && storage.getItem(UPDATE_CHECK_STORAGE_KEY)) || 0;
+  } catch (_) {
+    // 업데이트 확인 기록에 접근할 수 없어도 시작 확인은 계속 진행합니다.
+  }
 
   const escapeHtml = (value) =>
     String(value ?? '')
@@ -1854,6 +1890,69 @@
     } catch (_) {
       // 저장 실패는 인벤토리 작업을 막지 않습니다.
     }
+  }
+
+  let updateCheckInFlight = null;
+
+  function checkUserscriptUpdate(manual = false) {
+    if (updateCheckInFlight) return updateCheckInFlight;
+    const now = Date.now();
+    if (!shouldCheckUserscriptUpdate(lastUpdateCheckAt, now, manual)) {
+      return Promise.resolve(false);
+    }
+
+    lastUpdateCheckAt = now;
+    try {
+      storage && storage.setItem(UPDATE_CHECK_STORAGE_KEY, String(now));
+    } catch (_) {
+      // 업데이트 확인 기록은 선택 사항입니다.
+    }
+
+    const installedVersion = getInstalledUserscriptVersion();
+    state.updateInfo = {
+      status: 'checking',
+      installedVersion,
+      latestVersion: '',
+      error: '',
+    };
+    renderApp();
+
+    updateCheckInFlight = (async () => {
+      try {
+        if (!installedVersion) {
+          throw new Error('Tampermonkey에서 설치 버전을 확인할 수 없습니다.');
+        }
+        const requestImpl = typeof GM_xmlhttpRequest === 'function'
+          ? (details) => GM_xmlhttpRequest(details)
+          : null;
+        if (!requestImpl) {
+          throw new Error('Tampermonkey 업데이트 요청 기능을 사용할 수 없습니다.');
+        }
+        const latestVersion = await requestLatestUserscriptVersion(
+          requestImpl,
+          `${USERSCRIPT_UPDATE_URL}?update_check=${now}`,
+        );
+        state.updateInfo = {
+          status: getUserscriptUpdateState(installedVersion, latestVersion),
+          installedVersion,
+          latestVersion,
+          error: '',
+        };
+      } catch (error) {
+        state.updateInfo = {
+          status: 'error',
+          installedVersion,
+          latestVersion: '',
+          error: error && error.message || '업데이트를 확인하지 못했습니다.',
+        };
+      } finally {
+        updateCheckInFlight = null;
+        renderApp();
+      }
+      return true;
+    })();
+
+    return updateCheckInFlight;
   }
 
   let wantedCatalogRequest = null;
@@ -2442,6 +2541,173 @@
 
       .im2-section-body{
         padding:16px
+      }
+
+      .im2-update-status{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        flex-wrap:wrap;
+        gap:12px
+      }
+
+      .im2-update-status p{
+        margin:0;
+        color:var(--text);
+        overflow-wrap:anywhere
+      }
+
+      .im2-update-actions{
+        display:flex;
+        flex-wrap:wrap;
+        gap:8px
+      }
+
+      a.im2-btn{
+        text-decoration:none
+      }
+
+      .im2-update-help{
+        margin:12px 0 0;
+        color:var(--muted);
+        font-size:11px
+      }
+
+      .im2-section-heading{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        margin-bottom:14px
+      }
+
+      .im2-section-heading h2{
+        margin:0;
+        font-size:17px;
+        letter-spacing:-.02em
+      }
+
+      .im2-section-heading p{
+        margin:4px 0 0;
+        color:var(--muted);
+        font-size:12px
+      }
+
+      .im2-tracked-grid{
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:12px
+      }
+
+      .im2-tracked-card{
+        min-width:0;
+        padding:15px;
+        border:1px solid var(--border);
+        border-radius:11px;
+        background:var(--panel)
+      }
+
+      .im2-tracked-card>header{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:10px;
+        min-width:0;
+        padding-bottom:11px;
+        border-bottom:1px solid var(--border)
+      }
+
+      .im2-tracked-card h3{
+        min-width:0;
+        margin:0;
+        font-size:13px;
+        line-height:1.4;
+        overflow-wrap:anywhere
+      }
+
+      .im2-tracked-total{
+        flex:none;
+        color:var(--accent);
+        font-size:15px;
+        white-space:nowrap
+      }
+
+      .im2-tracked-card ul,
+      .im2-tracked-errors{
+        display:grid;
+        gap:7px;
+        margin:11px 0 0;
+        padding:0;
+        list-style:none
+      }
+
+      .im2-tracked-card li{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:8px;
+        min-width:0;
+        font-size:12px
+      }
+
+      .im2-tracked-card li span{
+        min-width:0;
+        overflow-wrap:anywhere
+      }
+
+      .im2-tracked-card li strong{
+        flex:none;
+        white-space:nowrap
+      }
+
+      .im2-tracked-card .im2-muted{
+        margin:10px 0 0;
+        color:var(--muted);
+        font-size:12px
+      }
+
+      .im2-tracked-partial,
+      .im2-empty-state{
+        margin-top:14px;
+        padding:13px;
+        border:1px solid var(--border);
+        border-radius:9px;
+        background:var(--panel);
+        color:var(--muted);
+        font-size:12px
+      }
+
+      .im2-tracked-partial{
+        border-color:color-mix(in srgb,var(--warning) 38%,var(--border));
+        background:var(--warning-soft)
+      }
+
+      .im2-tracked-partial>strong{
+        color:var(--warning)
+      }
+
+      .im2-tracked-partial p,
+      .im2-empty-state p{
+        margin:8px 0 0
+      }
+
+      .im2-tracked-partial ul{
+        display:grid;
+        gap:5px;
+        margin:8px 0 0;
+        padding-left:18px
+      }
+
+      .im2-tracked-partial li,
+      .im2-tracked-errors li{
+        overflow-wrap:anywhere
+      }
+
+      .im2-empty-state{
+        margin-top:0
+      }
+
+      .im2-empty-state .im2-btn{
+        margin-top:12px
       }
 
       .im2-action-grid{
@@ -3149,7 +3415,8 @@
         }
 
         .im2-shell{
-          grid-template-columns:1fr;
+          grid-template-columns:minmax(0,1fr);
+          grid-template-rows:auto minmax(0,1fr);
           width:100%;
           height:100%;
           border-radius:0
@@ -3162,6 +3429,7 @@
         }
 
         .im2-sidebar{
+          min-width:0;
           padding:8px 10px;
           padding-top:calc(8px + env(safe-area-inset-top,0px));
           border-right:0;
@@ -3175,9 +3443,11 @@
 
         .im2-nav{
           display:flex;
+          max-width:100%;
           overflow:auto;
           overscroll-behavior-x:contain;
-          -webkit-overflow-scrolling:touch
+          -webkit-overflow-scrolling:touch;
+          scrollbar-width:thin
         }
 
         .im2-nav button{
@@ -3204,6 +3474,10 @@
 
         .im2-action-grid{
           grid-template-columns:1fr
+        }
+
+        .im2-tracked-grid{
+          grid-template-columns:repeat(2,minmax(0,1fr))
         }
       }
 
@@ -3246,6 +3520,22 @@
 
         .im2-stat-value{
           font-size:22px
+        }
+
+        .im2-tracked-grid{
+          grid-template-columns:1fr
+        }
+
+        .im2-update-status{
+          align-items:stretch
+        }
+
+        .im2-update-actions{
+          width:100%
+        }
+
+        .im2-update-actions .im2-btn{
+          flex:1 1 auto
         }
 
         .im2-toolbar{
@@ -3352,6 +3642,10 @@
       dashboard: [
         '개요',
         '보유 현황과 필요한 작업을 빠르게 확인합니다.',
+      ],
+      'quantity-tracking': [
+        '수량 현황',
+        '호박 동상 트로핗, 유령 은상 트로핗, 제물 티켓의 보유 수량을 확인합니다.',
       ],
       inventory: [
         '인벤토리',
@@ -3600,6 +3894,12 @@
       return renderInventory();
     }
 
+    if (state.view === 'quantity-tracking') {
+      return renderTrackedQuantityMarkup(
+        summarizeTrackedItemQuantities(state.snapshots),
+      );
+    }
+
     if (state.view === 'organize') {
       return renderOrganize();
     }
@@ -3753,7 +4053,30 @@
                 구해요 누이를 선택하고 PNG를 생성
               </span>
             </button>
+
+            <button
+              class="im2-action-card"
+              data-view="quantity-tracking"
+            >
+              <strong>수량 현황</strong>
+              <span>
+                호박·유령 트로핗과 제물 티켓 합계 확인
+              </span>
+            </button>
           </div>
+        </div>
+      </section>
+
+      <section class="im2-section im2-update-panel">
+        <div class="im2-section-head">
+          <div>
+            <div class="im2-section-title">스크립트 업데이트</div>
+            <div class="im2-section-desc">GitHub의 안정 배포본 버전을 확인합니다.</div>
+          </div>
+        </div>
+        <div class="im2-section-body">
+          ${renderUserscriptUpdateStatusMarkup(state.updateInfo)}
+          <p class="im2-update-help">자동 설치 여부와 업데이트 확인 주기는 Tampermonkey의 이 스크립트 설정에서 조정할 수 있습니다.</p>
         </div>
       </section>
 
@@ -7699,6 +8022,11 @@
       return;
     }
 
+    if (action === 'check-script-update') {
+      checkUserscriptUpdate(true);
+      return;
+    }
+
     if (action === 'refresh-nui-wanted-catalog') {
       refreshNuiWantedCatalog();
       return;
@@ -9089,4 +9417,6 @@
       }
     },
   );
+
+  win.setTimeout(() => checkUserscriptUpdate(false), 0);
 })();
