@@ -1054,6 +1054,43 @@
     };
   }
 
+  function destructiveTargetFromRecord(record) {
+    if (!record) return null;
+
+    return {
+      characterId: String(record.characterId || ''),
+      characterName: String(record.characterName || ''),
+      itemId: String(record.itemId || ''),
+      itemName: String(record.itemName || ''),
+      quantity: Number(record.quantity),
+      boxType: String(record.boxType || 'none'),
+    };
+  }
+
+  function destructiveTargetsForDialog(dialog, currentRecords) {
+    if (Array.isArray(dialog && dialog.expectedTargets)) {
+      return dialog.expectedTargets;
+    }
+
+    return (currentRecords || [])
+      .map(destructiveTargetFromRecord)
+      .filter(Boolean);
+  }
+
+  function shouldIgnoreDestructiveSubmit(action, mutationState) {
+    if (![
+      'submit-discard-item',
+      'submit-use-item',
+      'submit-bulk-discard',
+    ].includes(action)) {
+      return false;
+    }
+
+    return !mutationState
+      || mutationState.busy
+      || !mutationState.dialog;
+  }
+
   function shouldCheckUserscriptUpdate(lastCheckedAt, now = Date.now(), manual = false) {
     if (manual) return true;
     const last = Number(lastCheckedAt);
@@ -1497,7 +1534,17 @@
     }));
   }
 
-  function createInventoryApi(fetchImpl, origin) {
+  function createInventoryApi(
+    fetchImpl,
+    origin,
+    mutationTimeoutMs = 30000,
+  ) {
+    const requestTimeoutMs =
+      Number.isFinite(mutationTimeoutMs)
+      && mutationTimeoutMs > 0
+        ? mutationTimeoutMs
+        : 30000;
+
     const request = async (path, fields) => {
       const body = new URLSearchParams();
 
@@ -1512,27 +1559,91 @@
           }
         });
 
-      const response = await fetchImpl(
-        new URL(path, origin).href,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type':
-              'application/x-www-form-urlencoded;charset=UTF-8',
-          },
-          body: body.toString(),
+      const controller =
+        typeof AbortController === 'function'
+          ? new AbortController()
+          : null;
+      const fetchOptions = {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type':
+            'application/x-www-form-urlencoded;charset=UTF-8',
         },
-      );
+        body: body.toString(),
+      };
 
+      if (controller) {
+        fetchOptions.signal = controller.signal;
+      }
+
+      let timeoutId;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          if (controller) controller.abort();
+          const error = new Error(
+            '요청 시간이 초과되어 서버 처리 상태를 확인할 수 없습니다.',
+          );
+          error.name = 'TimeoutError';
+          error.mutationOutcomeUnknown = true;
+          reject(error);
+        }, requestTimeoutMs);
+      });
+
+      let response;
       let data;
 
       try {
-        data = await response.json();
-      } catch (_) {
+        const requestPromise = (async () => {
+          const receivedResponse = await fetchImpl(
+            new URL(path, origin).href,
+            fetchOptions,
+          );
+          let responseData;
+
+          try {
+            responseData = await receivedResponse.json();
+          } catch (_) {
+            const error = new Error(
+              `HTTP ${receivedResponse.status}: JSON 응답이 아닙니다.`,
+            );
+            error.mutationOutcomeUnknown = true;
+            throw error;
+          }
+
+          return {
+            response: receivedResponse,
+            data: responseData,
+          };
+        })();
+        const result = await Promise.race([
+          requestPromise,
+          timeoutPromise,
+        ]);
+        response = result.response;
+        data = result.data;
+      } catch (error) {
+        if (error && error.mutationOutcomeUnknown === true) {
+          throw error;
+        }
+
+        const unknownError = new Error(
+          error && error.message
+          || '서버 응답을 받지 못했습니다.',
+        );
+        unknownError.name = error && error.name || 'Error';
+        unknownError.mutationOutcomeUnknown = true;
+        unknownError.cause = error;
+        throw unknownError;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (data && data.result === 'failure') {
         throw new Error(
-          `HTTP ${response.status}: JSON 응답이 아닙니다.`,
+          data && data.msg
+          || `HTTP ${response.status}`,
         );
       }
 
@@ -1541,10 +1652,12 @@
         || !data
         || data.result !== 'success'
       ) {
-        throw new Error(
+        const error = new Error(
           data && data.msg
-          || `HTTP ${response.status}`,
+          || `HTTP ${response.status}: 서버 처리 상태를 확인할 수 없습니다.`,
         );
+        error.mutationOutcomeUnknown = true;
+        throw error;
       }
 
       return data;
@@ -1669,6 +1782,8 @@
       splitItemTypes,
       normalizeFolder,
       normalizeInventoryRecord,
+      destructiveTargetsForDialog,
+      shouldIgnoreDestructiveSubmit,
       normalizeGrade,
       gradeInfo,
       chooseType,
@@ -1693,6 +1808,11 @@
       countStatuses,
       buildAutoOrganizePlan,
       createInventoryApi,
+      beginMutation,
+      verifyDestructiveTargets,
+      runDestructiveOperation,
+      runBulkOperations,
+      formatBulkMutationMessage,
       resolveImageUrl,
     };
     return;
@@ -6012,7 +6132,8 @@
 
   function renderDiscardDialog(dialog) {
     const item =
-      recordFor(dialog.key);
+      dialog.expectedTarget
+      || recordFor(dialog.key);
 
     if (!item) return '';
 
@@ -6064,7 +6185,8 @@
 
   function renderUseDialog(dialog) {
     const item =
-      recordFor(dialog.key);
+      dialog.expectedTarget
+      || recordFor(dialog.key);
 
     if (!item) return '';
 
@@ -6501,7 +6623,9 @@
 
   function renderBulkDiscard() {
     const items =
-      selectedRecords();
+      Array.isArray(state.dialog && state.dialog.expectedTargets)
+        ? state.dialog.expectedTargets
+        : selectedRecords();
 
     return dialogFrame(
       '선택 항목 버리기',
@@ -6608,7 +6732,10 @@
         'error',
       );
       renderApp();
-      return;
+      return {
+        ok: false,
+        errors: ['이 페이지에서 캐릭터 목록을 찾지 못했습니다.'],
+      };
     }
 
     state.loading = true;
@@ -6725,6 +6852,372 @@
     );
 
     renderApp();
+
+    return {
+      ok: summary.errors.length === 0,
+      errors: summary.errors,
+    };
+  }
+
+  function beginMutation(mutationState) {
+    if (mutationState.busy) return false;
+    mutationState.busy = true;
+    return true;
+  }
+
+  async function verifyDestructiveTargets(targets, getInventory) {
+    const issues = [];
+    const groups = new Map();
+    const list = Array.isArray(targets) ? targets : [];
+
+    if (!list.length) {
+      return {
+        ok: false,
+        issues: [{
+          characterId: '',
+          itemId: '',
+          status: 'unknown',
+          message: '확인할 대상이 없습니다.',
+        }],
+      };
+    }
+
+    list.forEach((target) => {
+      const characterId = String(target && target.characterId || '');
+      const itemId = String(target && target.itemId || '');
+      const quantity = Number(target && target.quantity);
+
+      if (
+        !characterId
+        || !itemId
+        || !Number.isFinite(quantity)
+        || quantity <= 0
+      ) {
+        issues.push({
+          characterId,
+          itemId,
+          status: 'unknown',
+          message: '확인에 필요한 대상 정보가 올바르지 않습니다.',
+        });
+        return;
+      }
+
+      if (!groups.has(characterId)) groups.set(characterId, []);
+      groups.get(characterId).push({
+        ...target,
+        characterId,
+        itemId,
+        quantity,
+      });
+    });
+
+    for (const [characterId, characterTargets] of groups) {
+      let data;
+
+      try {
+        data = await getInventory(characterId);
+      } catch (error) {
+        characterTargets.forEach((target) => {
+          issues.push({
+            characterId,
+            itemId: target.itemId,
+            target,
+            status: 'unknown',
+            message: error && error.message || '최신 인벤토리를 조회하지 못했습니다.',
+          });
+        });
+        continue;
+      }
+
+      if (!data || !Array.isArray(data.items)) {
+        characterTargets.forEach((target) => {
+          issues.push({
+            characterId,
+            itemId: target.itemId,
+            target,
+            status: 'unknown',
+            message: '최신 인벤토리 응답을 확인할 수 없습니다.',
+          });
+        });
+        continue;
+      }
+
+      characterTargets.forEach((target) => {
+        const matches = data.items.filter(
+          (item) => String((item && (item.item_id ?? item.id)) ?? '') === target.itemId,
+        );
+
+        if (!matches.length) {
+          issues.push({
+            characterId,
+            itemId: target.itemId,
+            target,
+            status: 'missing',
+            message: '최신 인벤토리에서 대상 아이템을 찾지 못했습니다.',
+          });
+          return;
+        }
+
+        if (matches.length !== 1) {
+          issues.push({
+            characterId,
+            itemId: target.itemId,
+            target,
+            status: 'unknown',
+            message: '최신 인벤토리에서 대상 아이템이 중복되어 확인할 수 없습니다.',
+          });
+          return;
+        }
+
+        const currentQuantity = Number(matches[0].quantity);
+        if (
+          matches[0].quantity === null
+          || matches[0].quantity === undefined
+          || matches[0].quantity === ''
+          || !Number.isFinite(currentQuantity)
+        ) {
+          issues.push({
+            characterId,
+            itemId: target.itemId,
+            target,
+            status: 'unknown',
+            message: '최신 인벤토리의 보유 수량을 확인할 수 없습니다.',
+          });
+          return;
+        }
+
+        if (currentQuantity !== target.quantity) {
+          issues.push({
+            characterId,
+            itemId: target.itemId,
+            target,
+            status: 'changed',
+            message: `보유 수량이 ${target.quantity}개에서 ${currentQuantity}개로 바뀌었습니다.`,
+          });
+        }
+      });
+    }
+
+    return {
+      ok: issues.length === 0,
+      issues,
+    };
+  }
+
+  async function runDestructiveOperation(
+    mutationState,
+    targets,
+    getInventory,
+    operation,
+    refreshAfter,
+  ) {
+    if (!beginMutation(mutationState)) {
+      return {
+        started: false,
+        duplicate: true,
+        status: 'blocked',
+      };
+    }
+
+    try {
+      const verification = await verifyDestructiveTargets(targets, getInventory);
+
+      if (!verification.ok) {
+        let refresh = { attempted: false, ok: false, errors: [] };
+        if (typeof refreshAfter === 'function') {
+          try {
+            const refreshed = await refreshAfter();
+            refresh = {
+              attempted: true,
+              ok: Boolean(refreshed && refreshed.ok),
+              errors: Array.isArray(refreshed && refreshed.errors) ? refreshed.errors : [],
+            };
+          } catch (error) {
+            refresh = {
+              attempted: true,
+              ok: false,
+              errors: [error && error.message || '인벤토리 재조회에 실패했습니다.'],
+            };
+          }
+        }
+
+        return {
+          started: false,
+          blocked: true,
+          status: verification.issues.some((issue) => issue.status === 'unknown')
+            ? 'unknown'
+            : 'changed',
+          verification,
+          refresh,
+        };
+      }
+
+      let value;
+      let status = 'success';
+      let error = null;
+
+      try {
+        value = await operation();
+      } catch (caught) {
+        error = caught;
+        status = caught && caught.mutationOutcomeUnknown === true
+          ? 'unknown'
+          : 'failed';
+      }
+
+      let refresh = { attempted: false, ok: false, errors: [] };
+      if (typeof refreshAfter === 'function') {
+        try {
+          const refreshed = await refreshAfter();
+          refresh = {
+            attempted: true,
+            ok: Boolean(refreshed && refreshed.ok),
+            errors: Array.isArray(refreshed && refreshed.errors) ? refreshed.errors : [],
+          };
+        } catch (caught) {
+          refresh = {
+            attempted: true,
+            ok: false,
+            errors: [caught && caught.message || '인벤토리 재조회에 실패했습니다.'],
+          };
+        }
+      }
+
+      return {
+        started: true,
+        status,
+        value,
+        error,
+        refresh,
+      };
+    } finally {
+      mutationState.busy = false;
+    }
+  }
+
+  async function runBulkOperations(operations, refreshAfter) {
+    const results = [];
+    let started = false;
+
+    for (const operation of operations || []) {
+      started = true;
+
+      try {
+        await operation.run();
+        results.push({
+          target: String(operation.target || '대상'),
+          status: 'success',
+          message: '',
+        });
+      } catch (error) {
+        results.push({
+          target: String(operation.target || '대상'),
+          status:
+            error && error.mutationOutcomeUnknown === true
+              ? 'unknown'
+              : 'failed',
+          message:
+            error && error.message
+            || '알 수 없는 오류',
+        });
+      }
+    }
+
+    let refresh = {
+      attempted: false,
+      ok: false,
+      errors: [],
+    };
+
+    if (started && typeof refreshAfter === 'function') {
+      try {
+        const refreshResult = await refreshAfter();
+        refresh = {
+          attempted: true,
+          ok: Boolean(refreshResult && refreshResult.ok),
+          errors: Array.isArray(refreshResult && refreshResult.errors)
+            ? refreshResult.errors
+            : [],
+        };
+      } catch (error) {
+        refresh = {
+          attempted: true,
+          ok: false,
+          errors: [
+            error && error.message
+            || '인벤토리 재조회에 실패했습니다.',
+          ],
+        };
+      }
+    }
+
+    return {
+      started,
+      results,
+      refresh,
+    };
+  }
+
+  function formatBulkMutationMessage(description, result) {
+    const counts = {
+      success: 0,
+      failed: 0,
+      unknown: 0,
+    };
+
+    result.results.forEach(({ status }) => {
+      if (Object.prototype.hasOwnProperty.call(counts, status)) {
+        counts[status] += 1;
+      }
+    });
+
+    const labels = {
+      success: '성공',
+      failed: '실패',
+      unknown: '상태 불명',
+    };
+    const targetDetails = result.results
+      .map(({ target, status, message }) =>
+        `${target}: ${labels[status] || '상태 불명'}${
+          message
+            ? ` (${message})`
+            : ''
+        }`,
+      )
+      .join(' / ');
+    const refreshText =
+        !result.started
+        ? '변경 요청이 시작되지 않았습니다.'
+        : result.refresh.ok
+          ? '요청 후 인벤토리를 재조회했습니다.'
+          : `재조회 실패${
+              result.refresh.errors.length
+                ? ` (${result.refresh.errors.join(', ')})`
+                : ''
+            } · 현재 표시 수량이 최신이 아닐 수 있습니다.`;
+
+    return `${description} 결과 · 대상 ${result.results.length} · 성공 ${counts.success} · 실패 ${counts.failed} · 상태 불명 ${counts.unknown}${
+      targetDetails
+        ? ` · ${targetDetails}`
+        : ''
+    } · ${refreshText}`;
+  }
+
+  function bulkMutationTone(result) {
+    const hasNonSuccess = result.results.some(
+      ({ status }) => status !== 'success',
+    );
+
+    if (!hasNonSuccess && result.refresh.ok) return 'success';
+    if (
+      result.results.some(({ status }) => status === 'success')
+      || result.results.some(({ status }) => status === 'unknown')
+      || !result.refresh.ok
+    ) {
+      return 'info';
+    }
+
+    return 'error';
   }
 
   async function runMutation(
@@ -6732,7 +7225,74 @@
     operation,
     options = {},
   ) {
-    state.busy = true;
+    if (Array.isArray(options.destructiveTargets)) {
+      if (state.busy) return;
+
+      const pending = runDestructiveOperation(
+        state,
+        options.destructiveTargets,
+        (characterId) => api.getInventory(characterId),
+        operation,
+        () => refresh(),
+      );
+
+      state.dialog = null;
+      setMessage(`${description} 대상을 최신 인벤토리와 확인하는 중입니다.`);
+      renderApp();
+
+      const result = await pending;
+      if (result.duplicate) return;
+
+      const refreshText = result.refresh.ok
+        ? '인벤토리를 재조회했습니다.'
+        : `재조회 실패${result.refresh.errors.length ? ` (${result.refresh.errors.join(', ')})` : ''} · 현재 표시 수량이 최신이 아닐 수 있습니다.`;
+
+      if (result.blocked) {
+        const issues = result.verification.issues;
+        const details = issues
+          .slice(0, 4)
+          .map((issue) => {
+            const target = issue.target || {};
+            const label = [target.characterName, target.itemName || issue.itemId]
+              .filter(Boolean)
+              .join(' · ');
+            return `${label ? `${label}: ` : ''}${issue.message}`;
+          })
+          .join(' / ');
+        const remaining = issues.length > 4 ? ` 외 ${issues.length - 4}건` : '';
+
+        setMessage(
+          `${description} 중단 · ${details}${remaining} · 변경 요청을 보내지 않았습니다. ${refreshText}`,
+          result.status === 'unknown' || !result.refresh.ok ? 'info' : 'error',
+        );
+      } else if (options.bulk) {
+        const bulkResult = {
+          ...result.value,
+          refresh: result.refresh,
+        };
+        setMessage(
+          formatBulkMutationMessage(description, bulkResult),
+          bulkMutationTone(bulkResult),
+        );
+      } else {
+        const outcomeText = result.status === 'success'
+          ? `${description} 완료`
+          : result.status === 'unknown'
+            ? `${description} 처리 상태를 확인할 수 없습니다. 자동 재시도하지 않았습니다.`
+            : `${description} 실패: ${result.error && result.error.message || '알 수 없는 오류'}`;
+        const tone = result.status === 'success'
+          ? (result.refresh.ok ? 'success' : 'info')
+          : result.status === 'unknown'
+            ? 'info'
+            : 'error';
+        setMessage(`${outcomeText} · ${refreshText}`, tone);
+      }
+
+      renderApp();
+      return;
+    }
+
+    if (!beginMutation(state)) return;
     state.dialog = null;
 
     setMessage(
@@ -6742,7 +7302,19 @@
     renderApp();
 
     try {
-      await operation();
+      const result = await operation();
+
+      if (options.bulk) {
+        state.busy = false;
+
+        setMessage(
+          formatBulkMutationMessage(description, result),
+          bulkMutationTone(result),
+        );
+
+        renderApp();
+        return;
+      }
 
       if (options.noRefresh) {
         state.busy = false;
@@ -8121,6 +8693,7 @@
       target.dataset.action;
 
     if (!action) return;
+    if (shouldIgnoreDestructiveSubmit(action, state)) return;
 
     closeOpenDetails(target);
 
@@ -8226,9 +8799,14 @@
     }
 
     if (action === 'discard-item') {
+      const key = decodeKey(target.dataset.key);
+      const item = recordFor(key);
+      if (!item) return;
+
       state.dialog = {
         type: 'discard-item',
-        key: decodeKey(target.dataset.key),
+        key,
+        expectedTarget: destructiveTargetFromRecord(item),
       };
 
       renderApp();
@@ -8236,9 +8814,14 @@
     }
 
     if (action === 'use-item') {
+      const key = decodeKey(target.dataset.key);
+      const item = recordFor(key);
+      if (!item) return;
+
       state.dialog = {
         type: 'use-item',
-        key: decodeKey(target.dataset.key),
+        key,
+        expectedTarget: destructiveTargetFromRecord(item),
       };
 
       renderApp();
@@ -8257,6 +8840,9 @@
     if (action === 'bulk-discard') {
       state.dialog = {
         type: 'bulk-discard',
+        expectedTargets: selectedRecords()
+          .map(destructiveTargetFromRecord)
+          .filter(Boolean),
       };
 
       renderApp();
@@ -8408,7 +8994,8 @@
 
     if (action === 'submit-discard-item') {
       const item =
-        recordFor(state.dialog.key);
+        state.dialog.expectedTarget
+        || recordFor(state.dialog.key);
 
       const quantity =
         Number(
@@ -8438,6 +9025,7 @@
             [item.itemId],
             [quantity],
           ),
+        { destructiveTargets: [item] },
       );
 
       return;
@@ -8445,7 +9033,8 @@
 
     if (action === 'submit-use-item') {
       const item =
-        recordFor(state.dialog.key);
+        state.dialog.expectedTarget
+        || recordFor(state.dialog.key);
 
       if (!item) return;
 
@@ -8481,6 +9070,7 @@
       runMutation(
         '아이템 사용',
         () => api.useItem(fields),
+        { destructiveTargets: [item] },
       );
 
       return;
@@ -8624,24 +9214,29 @@
                 ? select.value
                 : '0';
 
-            return () =>
-              api.assignFolder(
-                charId,
-                items.map(
-                  (i) => i.itemId,
+            return {
+              target:
+                `${items[0] && items[0].characterName || charId} (${items.length}개)`,
+              run: () =>
+                api.assignFolder(
+                  charId,
+                  items.map(
+                    (i) => i.itemId,
+                  ),
+                  folderId,
                 ),
-                folderId,
-              );
+            };
           },
         );
 
       runMutation(
         `${formatNumber(state.selectedKeys.size)}개 아이템 폴더 이동`,
-        async () => {
-          for (const operation of operations) {
-            await operation();
-          }
-        },
+        () =>
+          runBulkOperations(
+            operations,
+            () => refresh(),
+          ),
+        { bulk: true },
       );
 
       return;
@@ -8662,19 +9257,21 @@
         return;
       }
 
+      const targets = destructiveTargetsForDialog(
+        state.dialog,
+        selectedRecords(),
+      );
       const groups =
         groupRecordsByCharacter(
-          selectedRecords(),
+          targets,
         );
 
-      runMutation(
-        `${formatNumber(state.selectedKeys.size)}개 항목 버리기`,
-        async () => {
-          for (
-            const [charId, items]
-            of groups
-          ) {
-            await api.discardItems(
+      const operations = groups.map(
+        ([charId, items]) => ({
+          target:
+            `${items[0] && items[0].characterName || charId} (${items.length}개)`,
+          run: () =>
+            api.discardItems(
               charId,
               items.map(
                 (i) => i.itemId,
@@ -8682,8 +9279,16 @@
               items.map(
                 (i) => i.quantity,
               ),
-            );
-          }
+            ),
+        }),
+      );
+
+      runMutation(
+        `${formatNumber(targets.length)}개 항목 버리기`,
+        () => runBulkOperations(operations),
+        {
+          bulk: true,
+          destructiveTargets: targets,
         },
       );
 
