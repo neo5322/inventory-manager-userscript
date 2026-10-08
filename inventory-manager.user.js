@@ -916,6 +916,189 @@
       );
   }
 
+  const USERSCRIPT_UPDATE_URL =
+    'https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js';
+  const USERSCRIPT_UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
+
+  function parseUserscriptVersion(source) {
+    const match = String(source || '').match(/^\s*\/\/\s*@version\s+([0-9]+(?:\.[0-9]+)*)\s*$/m);
+    return match ? match[1] : '';
+  }
+
+  function compareUserscriptVersions(left, right) {
+    const parse = (value) => {
+      const version = String(value || '').trim();
+      if (!/^\d+(?:\.\d+)*$/.test(version)) {
+        throw new Error(`잘못된 버전 형식입니다: ${version}`);
+      }
+      return version.split('.').map((part) => {
+        const number = Number(part);
+        if (!Number.isSafeInteger(number)) {
+          throw new Error(`잘못된 버전 형식입니다: ${version}`);
+        }
+        return number;
+      });
+    };
+    const leftParts = parse(left);
+    const rightParts = parse(right);
+    const length = Math.max(leftParts.length, rightParts.length);
+    for (let index = 0; index < length; index += 1) {
+      const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+      if (difference) return difference > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function getUserscriptUpdateState(installedVersion, latestVersion) {
+    return compareUserscriptVersions(latestVersion, installedVersion) > 0
+      ? 'available'
+      : 'current';
+  }
+
+  function shouldCheckUserscriptUpdate(lastCheckedAt, now = Date.now(), manual = false) {
+    if (manual) return true;
+    const last = Number(lastCheckedAt);
+    const current = Number(now);
+    return !Number.isFinite(last)
+      || last <= 0
+      || !Number.isFinite(current)
+      || current - last >= USERSCRIPT_UPDATE_INTERVAL;
+  }
+
+  function escapeMarkup(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderUserscriptUpdateStatusMarkup(updateInfo) {
+    const info = updateInfo || {};
+    const installed = escapeMarkup(info.installedVersion || '확인 불가');
+    const button = info.status === 'checking'
+      ? '<button class="im2-button" type="button" disabled>업데이트 확인 중…</button>'
+      : '<button class="im2-button" type="button" data-action="check-script-update">업데이트 확인</button>';
+    let message = `현재 설치 버전 ${installed}`;
+    let installLink = '';
+    if (info.status === 'checking') {
+      message += ' · 업데이트를 확인하고 있습니다.';
+    } else if (info.status === 'current') {
+      message += ` · 최신 버전입니다${info.latestVersion ? ` (${escapeMarkup(info.latestVersion)})` : ''}.`;
+    } else if (info.status === 'available') {
+      const latest = escapeMarkup(info.latestVersion || '새 버전');
+      message += ` · ${latest} 업데이트를 사용할 수 있습니다.`;
+      installLink = `<a class="im2-button im2-button-primary" href="${USERSCRIPT_UPDATE_URL}" target="_blank" rel="noopener">업데이트 설치</a>`;
+    } else if (info.status === 'error') {
+      message += ` · 확인 실패: ${escapeMarkup(info.error || '잠시 후 다시 시도해 주세요.')}`;
+    } else {
+      message += ' · 업데이트 확인 전입니다.';
+    }
+    return `<div class="im2-update-status" role="status"><p>${message}</p><div class="im2-update-actions">${installLink}${button}</div></div>`;
+  }
+
+  const TRACKED_QUANTITY_ITEMS = [
+    {
+      key: 'pumpkin-bronze-trophy',
+      label: '호박 동상 트로핖',
+      aliases: ['호박 동상 트로핖', '호박 동상 트로피'],
+    },
+    {
+      key: 'ghost-silver-trophy',
+      label: '유령 은상 트로핖',
+      aliases: ['유령 은상 트로핖', '유령 은상 트로피'],
+    },
+    {
+      key: 'sacrifice-ticket',
+      label: '제물 티켓',
+      aliases: ['제물 티켓'],
+    },
+  ].map((item) => ({
+    ...item,
+    aliasKeys: new Set(item.aliases.map((alias) =>
+      normalizeItemName(alias).replace(/\s/g, '').toLocaleLowerCase('ko'),
+    )),
+  }));
+
+  function summarizeTrackedItemQuantities(snapshots) {
+    const list = Array.isArray(snapshots) ? snapshots : [];
+    const successful = list.filter((snapshot) => snapshot && !snapshot.error);
+    const errors = list.filter((snapshot) => snapshot && snapshot.error).map((snapshot) => ({
+      characterId: String(snapshot.characterId ?? ''),
+      characterName: String(snapshot.characterName || snapshot.characterId || '캐릭터'),
+      error: String(snapshot.error),
+    }));
+    const byItem = new Map(TRACKED_QUANTITY_ITEMS.map((item) => [item.key, new Map()]));
+
+    successful.forEach((snapshot) => {
+      (snapshot.records || []).forEach((record) => {
+        const itemName = normalizeItemName(record && record.itemName)
+          .replace(/\s/g, '')
+          .toLocaleLowerCase('ko');
+        const definition = TRACKED_QUANTITY_ITEMS.find((item) => item.aliasKeys.has(itemName));
+        if (!definition) return;
+        const quantity = toQuantity(record && record.quantity);
+        if (!quantity) return;
+
+        const characterId = String(snapshot.characterId ?? record.characterId ?? '');
+        const characterName = String(snapshot.characterName || record.characterName || characterId || '캐릭터');
+        const characters = byItem.get(definition.key);
+        const character = characters.get(characterId) || {
+          characterId,
+          characterName,
+          quantity: 0,
+        };
+        character.quantity += quantity;
+        characters.set(characterId, character);
+      });
+    });
+
+    const items = TRACKED_QUANTITY_ITEMS.map((definition) => {
+      const characters = [...byItem.get(definition.key).values()]
+        .sort((left, right) =>
+          left.characterName.localeCompare(right.characterName, 'ko')
+          || left.characterId.localeCompare(right.characterId, 'ko'),
+        );
+      return {
+        key: definition.key,
+        label: definition.label,
+        total: characters.reduce((total, character) => total + character.quantity, 0),
+        characters,
+      };
+    });
+
+    return {
+      hasData: successful.length > 0,
+      hasErrors: errors.length > 0,
+      errors,
+      items,
+    };
+  }
+
+  function renderTrackedQuantityMarkup(summary) {
+    const data = summary || summarizeTrackedItemQuantities([]);
+    if (!data.hasData) {
+      const errors = (data.errors || []).map((entry) =>
+        `<li><strong>${escapeMarkup(entry.characterName)}</strong>: ${escapeMarkup(entry.error)}</li>`,
+      ).join('');
+      return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title"><header class="im2-section-heading"><div><h2 id="im2-tracked-quantity-title">수량 현황</h2><p>캐릭터 인벤토리를 불러오면 아이템별 합계와 캐릭터별 수량을 표시합니다.</p></div></header><div class="im2-empty-state"><p>아직 인벤토리 조회 결과가 없습니다.</p><button class="im2-button im2-button-primary" type="button" data-action="refresh">인벤토리 새로고침</button>${errors ? `<ul class="im2-tracked-errors">${errors}</ul>` : ''}</div></section>`;
+    }
+
+    const cards = (data.items || []).map((item) => {
+      const characters = (item.characters || []).map((character) =>
+        `<li><span>${escapeMarkup(character.characterName)}</span><strong>${new Intl.NumberFormat('ko-KR').format(character.quantity)}개</strong></li>`,
+      ).join('');
+      return `<article class="im2-tracked-card" data-item-key="${escapeMarkup(item.key)}"><header><h3>${escapeMarkup(item.label)}</h3><strong class="im2-tracked-total">${new Intl.NumberFormat('ko-KR').format(item.total)}개</strong></header>${characters ? `<ul>${characters}</ul>` : '<p class="im2-muted">보유 수량 없음</p>'}</article>`;
+    }).join('');
+    const errors = data.hasErrors
+      ? `<aside class="im2-tracked-partial" role="status"><strong>일부 캐릭터 조회 실패</strong><ul>${(data.errors || []).map((entry) =>
+        `<li><strong>${escapeMarkup(entry.characterName)}</strong>: ${escapeMarkup(entry.error)}</li>`,
+      ).join('')}</ul><p>표시된 합계는 조회에 성공한 캐릭터만 포함합니다.</p></aside>`
+      : '';
+    return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title"><header class="im2-section-heading"><div><h2 id="im2-tracked-quantity-title">수량 현황</h2><p>전체 보유 수량과 캐릭터별 수량</p></div></header><div class="im2-tracked-grid">${cards}</div>${errors}</section>`;
+  }
+
   function isNuiItemName(value) {
     const name = normalizeItemName(value);
 
@@ -1369,6 +1552,13 @@
       filterInventory,
       summarizeSnapshots,
       countExchangeTickets,
+      parseUserscriptVersion,
+      compareUserscriptVersions,
+      getUserscriptUpdateState,
+      shouldCheckUserscriptUpdate,
+      renderUserscriptUpdateStatusMarkup,
+      summarizeTrackedItemQuantities,
+      renderTrackedQuantityMarkup,
       isNuiItemName,
       makeNuiRecords,
       nuiDuplicateKey,
