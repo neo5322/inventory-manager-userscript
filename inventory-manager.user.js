@@ -5,8 +5,8 @@
 // @supportURL   https://github.com/neo5322/inventory-manager-userscript/issues
 // @updateURL    https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
-// @version      2.5.0
-// @description  인벤토리 관리, 누이 이미지 페이지 분할·간략화 및 개별/ZIP 저장을 지원합니다.
+// @version      2.6.0
+// @description  인벤토리·수량 현황, 자동 업데이트 확인, 누이 이미지 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
 // @grant        GM_info
@@ -974,6 +974,9 @@
           ontimeout() {
             finish(reject, new Error('업데이트 확인 시간이 초과되었습니다.'));
           },
+          onabort() {
+            finish(reject, new Error('업데이트 확인 요청이 취소되었습니다.'));
+          },
         });
       } catch (error) {
         finish(reject, error instanceof Error ? error : new Error(String(error)));
@@ -1009,6 +1012,46 @@
     return compareUserscriptVersions(latestVersion, installedVersion) > 0
       ? 'available'
       : 'current';
+  }
+
+  function restoreSavedUserscriptUpdateInfo(installedVersion, serialized) {
+    const installed = String(installedVersion || '').trim();
+    if (!installed || !serialized) return null;
+    let saved;
+    try {
+      saved = JSON.parse(serialized);
+    } catch (_) {
+      return null;
+    }
+    if (
+      !saved
+      || saved.installedVersion !== installed
+      || !['current', 'available', 'error'].includes(saved.status)
+    ) {
+      return null;
+    }
+    if (saved.status === 'error') {
+      return {
+        status: 'error',
+        installedVersion: installed,
+        latestVersion: '',
+        error: String(saved.error || '업데이트를 확인하지 못했습니다.'),
+      };
+    }
+    const latestVersion = String(saved.latestVersion || '').trim();
+    try {
+      if (getUserscriptUpdateState(installed, latestVersion) !== saved.status) {
+        return null;
+      }
+    } catch (_) {
+      return null;
+    }
+    return {
+      status: saved.status,
+      installedVersion: installed,
+      latestVersion,
+      error: '',
+    };
   }
 
   function shouldCheckUserscriptUpdate(lastCheckedAt, now = Date.now(), manual = false) {
@@ -1144,7 +1187,7 @@
       const errors = (data.errors || []).map((entry) =>
         `<li><strong>${escapeMarkup(entry.characterName)}</strong>: ${escapeMarkup(entry.error)}</li>`,
       ).join('');
-      return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title"><header class="im2-section-heading"><div><h2 id="im2-tracked-quantity-title">수량 현황</h2><p>캐릭터 인벤토리를 불러오면 아이템별 합계와 캐릭터별 수량을 표시합니다.</p></div></header><div class="im2-empty-state"><p>아직 인벤토리 조회 결과가 없습니다.</p><button class="im2-button im2-button-primary" type="button" data-action="refresh">인벤토리 새로고침</button>${errors ? `<ul class="im2-tracked-errors">${errors}</ul>` : ''}</div></section>`;
+      return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title"><header class="im2-section-heading"><div><h2 id="im2-tracked-quantity-title">수량 현황</h2><p>캐릭터 인벤토리를 불러오면 아이템별 합계와 캐릭터별 수량을 표시합니다.</p></div></header><div class="im2-empty-state"><p>아직 인벤토리 조회 결과가 없습니다.</p><button class="im2-btn primary" type="button" data-action="refresh">인벤토리 새로고침</button>${errors ? `<ul class="im2-tracked-errors">${errors}</ul>` : ''}</div></section>`;
     }
 
     const cards = (data.items || []).map((item) => {
@@ -1620,6 +1663,7 @@
       getUserscriptUpdateState,
       shouldCheckUserscriptUpdate,
       renderUserscriptUpdateStatusMarkup,
+      restoreSavedUserscriptUpdateInfo,
       summarizeTrackedItemQuantities,
       renderTrackedQuantityMarkup,
       isNuiItemName,
@@ -1653,6 +1697,9 @@
 
   const UPDATE_CHECK_STORAGE_KEY =
     'manosaba-inventory-manager:update-check:v1';
+
+  const UPDATE_RESULT_STORAGE_KEY =
+    'manosaba-inventory-manager:update-result:v1';
 
   const OLD_MANAGER_KEY =
     'manosaba-inventory-manager:v1';
@@ -1716,6 +1763,17 @@
       ? oldNuiRaw.statuses
       : oldNuiRaw;
 
+  const installedUserscriptVersion = getInstalledUserscriptVersion();
+  let savedUserscriptUpdateInfo = null;
+  try {
+    savedUserscriptUpdateInfo = restoreSavedUserscriptUpdateInfo(
+      installedUserscriptVersion,
+      storage && storage.getItem(UPDATE_RESULT_STORAGE_KEY),
+    );
+  } catch (_) {
+    // 저장된 업데이트 결과는 선택 사항입니다.
+  }
+
   const state = {
     open: false,
     view: 'dashboard',
@@ -1723,9 +1781,9 @@
     loading: false,
     loadingProgress: null,
     message: null,
-    updateInfo: {
+    updateInfo: savedUserscriptUpdateInfo || {
       status: 'idle',
-      installedVersion: getInstalledUserscriptVersion(),
+      installedVersion: installedUserscriptVersion,
       latestVersion: '',
       error: '',
     },
@@ -1804,6 +1862,7 @@
   } catch (_) {
     // 업데이트 확인 기록에 접근할 수 없어도 시작 확인은 계속 진행합니다.
   }
+  if (state.updateInfo.status === 'idle') lastUpdateCheckAt = 0;
 
   const escapeHtml = (value) =>
     String(value ?? '')
@@ -1946,6 +2005,16 @@
           error: error && error.message || '업데이트를 확인하지 못했습니다.',
         };
       } finally {
+        if (state.updateInfo.installedVersion) {
+          try {
+            storage && storage.setItem(
+              UPDATE_RESULT_STORAGE_KEY,
+              JSON.stringify(state.updateInfo),
+            );
+          } catch (_) {
+            // 저장된 결과를 읽지 못해도 업데이트 확인은 동작합니다.
+          }
+        }
         updateCheckInFlight = null;
         renderApp();
       }
