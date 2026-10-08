@@ -925,6 +925,48 @@
     return match ? match[1] : '';
   }
 
+  function requestLatestUserscriptVersion(requestImpl, url) {
+    if (typeof requestImpl !== 'function') {
+      return Promise.reject(new Error('Tampermonkey 업데이트 요청 기능을 사용할 수 없습니다.'));
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        callback(value);
+      };
+      try {
+        requestImpl({
+          method: 'GET',
+          url,
+          anonymous: true,
+          timeout: 15000,
+          onload(response) {
+            if (!response || response.status !== 200) {
+              finish(reject, new Error(`HTTP ${response && response.status || '응답 오류'}`));
+              return;
+            }
+            const version = parseUserscriptVersion(response.responseText);
+            if (!version) {
+              finish(reject, new Error('원격 스크립트에서 버전 정보를 찾지 못했습니다.'));
+              return;
+            }
+            finish(resolve, version);
+          },
+          onerror() {
+            finish(reject, new Error('업데이트 서버에 연결하지 못했습니다.'));
+          },
+          ontimeout() {
+            finish(reject, new Error('업데이트 확인 시간이 초과되었습니다.'));
+          },
+        });
+      } catch (error) {
+        finish(reject, error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
   function compareUserscriptVersions(left, right) {
     const parse = (value) => {
       const version = String(value || '').trim();
@@ -1553,6 +1595,7 @@
       summarizeSnapshots,
       countExchangeTickets,
       parseUserscriptVersion,
+      requestLatestUserscriptVersion,
       compareUserscriptVersions,
       getUserscriptUpdateState,
       shouldCheckUserscriptUpdate,
