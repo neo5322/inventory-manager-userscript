@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/neo5322/inventory-manager-userscript/issues
 // @updateURL    https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
-// @version      2.6.1
+// @version      2.6.2
 // @description  인벤토리·수량 현황, 자동 업데이트 확인, 누이 이미지 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
