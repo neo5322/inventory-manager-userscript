@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/neo5322/inventory-manager-userscript/issues
 // @updateURL    https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
-// @version      2.6.0
+// @version      2.6.1
 // @description  인벤토리·수량 현황, 자동 업데이트 확인, 누이 이미지 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
@@ -1181,13 +1181,32 @@
     };
   }
 
-  function renderTrackedQuantityMarkup(summary) {
+  function renderTrackedQuantityMarkup(summary, options = {}) {
     const data = summary || summarizeTrackedItemQuantities([]);
+    const loading = Boolean(options.loading);
+    const progress = options.loadingProgress || {};
+    const done = Math.max(0, Number(progress.done) || 0);
+    const total = Math.max(0, Number(progress.total) || 0);
+    const status = loading
+      ? total
+        ? `${new Intl.NumberFormat('ko-KR').format(done)} / ${new Intl.NumberFormat('ko-KR').format(total)}개 캐릭터 불러오는 중`
+        : '인벤토리를 불러오는 중입니다.'
+      : options.lastFetchedLabel
+        ? `마지막 조회 ${escapeMarkup(options.lastFetchedLabel)}`
+        : '';
+    const description = data.hasData
+      ? '전체 보유 수량과 캐릭터별 수량'
+      : '캐릭터 인벤토리를 불러오면 아이템별 합계와 캐릭터별 수량을 표시합니다.';
+    const refreshButton = `<button class="im2-btn${data.hasData ? '' : ' primary'}" type="button" data-action="refresh"${loading || options.busy ? ' disabled' : ''}>${loading ? '불러오는 중…' : '새로고침'}</button>`;
+    const heading = `<header class="im2-section-heading"><div><h2 id="im2-tracked-quantity-title">수량 현황</h2><p>${description}</p>${status ? `<p class="im2-tracked-status"${loading ? ' role="status" aria-live="polite"' : ''}>${status}</p>` : ''}</div>${refreshButton}</header>`;
     if (!data.hasData) {
       const errors = (data.errors || []).map((entry) =>
         `<li><strong>${escapeMarkup(entry.characterName)}</strong>: ${escapeMarkup(entry.error)}</li>`,
       ).join('');
-      return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title"><header class="im2-section-heading"><div><h2 id="im2-tracked-quantity-title">수량 현황</h2><p>캐릭터 인벤토리를 불러오면 아이템별 합계와 캐릭터별 수량을 표시합니다.</p></div></header><div class="im2-empty-state"><p>아직 인벤토리 조회 결과가 없습니다.</p><button class="im2-btn primary" type="button" data-action="refresh">인벤토리 새로고침</button>${errors ? `<ul class="im2-tracked-errors">${errors}</ul>` : ''}</div></section>`;
+      const emptyMessage = loading
+        ? '인벤토리를 불러오는 중입니다.'
+        : '아직 인벤토리 조회 결과가 없습니다.';
+      return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title">${heading}<div class="im2-empty-state"><p>${emptyMessage}</p>${errors ? `<ul class="im2-tracked-errors">${errors}</ul>` : ''}</div></section>`;
     }
 
     const cards = (data.items || []).map((item) => {
@@ -1201,7 +1220,7 @@
         `<li><strong>${escapeMarkup(entry.characterName)}</strong>: ${escapeMarkup(entry.error)}</li>`,
       ).join('')}</ul><p>표시된 합계는 조회에 성공한 캐릭터만 포함합니다.</p></aside>`
       : '';
-    return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title"><header class="im2-section-heading"><div><h2 id="im2-tracked-quantity-title">수량 현황</h2><p>전체 보유 수량과 캐릭터별 수량</p></div></header><div class="im2-tracked-grid">${cards}</div>${errors}</section>`;
+    return `<section class="im2-tracked-quantities" aria-labelledby="im2-tracked-quantity-title">${heading}<div class="im2-tracked-grid">${cards}</div>${errors}</section>`;
   }
 
   function isNuiItemName(value) {
@@ -2661,6 +2680,22 @@
         font-size:12px
       }
 
+      .im2-tracked-quantities>.im2-section-heading{
+        align-items:center;
+        flex-wrap:wrap;
+        gap:12px
+      }
+
+      .im2-tracked-status{
+        margin:6px 0 0!important;
+        color:var(--muted);
+        font-size:11px
+      }
+
+      .im2-tracked-quantities>.im2-section-heading .im2-btn{
+        flex:none
+      }
+
       .im2-tracked-grid{
         display:grid;
         grid-template-columns:repeat(3,minmax(0,1fr));
@@ -3966,6 +4001,14 @@
     if (state.view === 'quantity-tracking') {
       return renderTrackedQuantityMarkup(
         summarizeTrackedItemQuantities(state.snapshots),
+        {
+          lastFetchedLabel: state.lastFetchedAt
+            ? formatDate(state.lastFetchedAt)
+            : '',
+          loading: state.loading,
+          loadingProgress: state.loadingProgress,
+          busy: state.busy,
+        },
       );
     }
 
