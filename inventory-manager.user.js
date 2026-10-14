@@ -5,7 +5,7 @@
 // @supportURL   https://github.com/neo5322/inventory-manager-userscript/issues
 // @updateURL    https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
 // @downloadURL  https://raw.githubusercontent.com/neo5322/inventory-manager-userscript/main/inventory-manager.user.js
-// @version      2.6.2
+// @version      2.6.3
 // @description  인벤토리·수량 현황, 자동 업데이트 확인, 누이 이미지 저장을 지원합니다.
 // @match        https://prm.dothome.co.kr/my_page*
 // @run-at       document-idle
@@ -1472,7 +1472,15 @@
           }
         }
       }
-      return { itemId, itemName, target, suggestion, tier, reason };
+      return {
+        itemId,
+        itemName,
+        types: Array.isArray(item.types) ? item.types : [],
+        target,
+        suggestion,
+        tier,
+        reason,
+      };
     });
     const buckets = new Map();
     decisions.filter((decision) => decision.target).forEach((decision) => {
@@ -1494,6 +1502,51 @@
       skipped: decisions.filter((decision) => !decision.target),
       decisions,
     };
+  }
+
+  function organizeDecisionGroupKey(decision) {
+    if (decision.target) return `target:${decision.target}`;
+    if (decision.suggestion) return `suggestion:${decision.suggestion}`;
+    const types = Array.isArray(decision.types)
+      ? decision.types.filter(Boolean).join(' · ')
+      : '';
+    return `unassigned:${types || decision.reason || '목적지 미정'}`;
+  }
+
+  function buildOrganizeQuickViewModel(snapshot, decisions, baseOrigin) {
+    const recordsById = new Map((snapshot && snapshot.records || [])
+      .map((record) => [String(record.itemId), record]));
+    const groups = new Map();
+    (decisions || []).forEach((decision) => {
+      const key = organizeDecisionGroupKey(decision);
+      if (!groups.has(key)) {
+        const kind = key.startsWith('target:') ? 'target'
+          : key.startsWith('suggestion:') ? 'suggestion' : 'unassigned';
+        groups.set(key, {
+          key,
+          kind,
+          destination: kind === 'unassigned' ? '' : key.slice(key.indexOf(':') + 1),
+          reason: kind === 'unassigned' ? decision.reason || '목적지 미정' : '',
+          label: kind === 'unassigned'
+            ? (Array.isArray(decision.types) ? decision.types.filter(Boolean).join(' · ') : '')
+              || decision.reason || '목적지 미정'
+            : '',
+          items: [],
+        });
+      }
+      const record = recordsById.get(String(decision.itemId)) || null;
+      groups.get(key).items.push({
+        decision,
+        record,
+        imageUrl: resolveImageUrl(record && record.imageUrl, baseOrigin),
+        quantity: record ? record.quantity : null,
+        types: record && Array.isArray(record.types) ? record.types : [],
+      });
+    });
+    const order = { target: 0, suggestion: 1, unassigned: 2 };
+    return [...groups.values()].sort((left, right) =>
+      order[left.kind] - order[right.kind]
+      || left.key.localeCompare(right.key, 'ko'));
   }
 
   function getNuiTradeImageItems(items) {
@@ -1807,6 +1860,7 @@
       mergeNuiTradeImageItems,
       countStatuses,
       buildAutoOrganizePlan,
+      buildOrganizeQuickViewModel,
       createInventoryApi,
       beginMutation,
       verifyDestructiveTargets,
@@ -1950,6 +2004,9 @@
 
     organizeRules: currentSaved.organizeRules || {},
     organizeOverrides: {},
+    organizeSelections: {},
+    organizeRememberChoices: {},
+    organizeDestinationChoices: {},
 
     organizePlans: null,
     dialog: null,
@@ -3219,6 +3276,132 @@
         gap:14px
       }
 
+      .im2-organize-layout{
+        display:grid;
+        gap:12px
+      }
+
+      .im2-organize-settings>summary{
+        padding:12px 14px;
+        cursor:pointer;
+        font-weight:700
+      }
+
+      .im2-organize-settings[open]>summary{
+        border-bottom:1px solid var(--border)
+      }
+
+      .im2-organize-settings-body{
+        padding:14px
+      }
+
+      .im2-organize-character{
+        padding:12px 0;
+        border-top:1px solid var(--border)
+      }
+
+      .im2-organize-character:first-child{
+        border-top:0
+      }
+
+      .im2-organize-character-head{
+        display:flex;
+        align-items:baseline;
+        flex-wrap:wrap;
+        gap:8px
+      }
+
+      .im2-organize-bulkbar{
+        display:flex;
+        align-items:center;
+        flex-wrap:wrap;
+        gap:7px;
+        margin:10px 0;
+        padding:10px;
+        border:1px solid var(--border);
+        border-radius:8px;
+        background:var(--panel-2)
+      }
+
+      .im2-organize-bulkbar strong{
+        margin-right:auto;
+        font-size:11px
+      }
+
+      .im2-organize-bulkbar select{
+        min-width:180px;
+        max-width:100%
+      }
+
+      .im2-organize-bulkbar label{
+        display:flex;
+        align-items:center;
+        gap:5px;
+        color:var(--muted);
+        font-size:10px
+      }
+
+      .im2-organize-group-head{
+        display:flex;
+        align-items:center;
+        flex-wrap:wrap;
+        gap:7px;
+        padding:8px 0 4px;
+        font-size:11px
+      }
+
+      .im2-organize-group-head strong{
+        flex:1;
+        min-width:180px
+      }
+
+      .im2-organize-item{
+        display:grid;
+        grid-template-columns:18px 52px minmax(0,1fr);
+        align-items:center;
+        gap:10px;
+        padding:8px 0;
+        border-top:1px solid var(--border);
+        cursor:pointer
+      }
+
+      .im2-organize-thumb{
+        display:grid;
+        place-items:center;
+        width:52px;
+        height:52px;
+        object-fit:contain;
+        border:1px solid var(--border);
+        border-radius:7px;
+        background:var(--panel-2);
+        color:var(--muted);
+        font-size:20px
+      }
+
+      .im2-organize-item-body{
+        min-width:0
+      }
+
+      .im2-organize-item-name{
+        overflow-wrap:anywhere;
+        font-size:11px
+      }
+
+      .im2-organize-item-meta{
+        display:flex;
+        flex-wrap:wrap;
+        gap:4px 8px;
+        margin-top:3px;
+        color:var(--muted);
+        font-size:10px
+      }
+
+      .im2-organize-item-reason{
+        margin-top:3px;
+        color:var(--muted);
+        font-size:10px
+      }
+
       .im2-field{
         display:grid;
         gap:6px;
@@ -3263,7 +3446,7 @@
 
       .im2-plan-summary{
         display:grid;
-        grid-template-columns:repeat(3,1fr);
+        grid-template-columns:repeat(5,minmax(0,1fr));
         gap:8px;
         margin-bottom:12px
       }
@@ -3351,6 +3534,11 @@
 
       @media(max-width:650px){
         .im2-plan-item{grid-template-columns:minmax(0,1fr)}
+        .im2-organize-bulkbar select{width:100%;min-width:0}
+        .im2-organize-bulkbar strong{width:100%}
+        .im2-organize-item{grid-template-columns:18px 44px minmax(0,1fr);gap:8px}
+        .im2-organize-thumb{width:44px;height:44px}
+        .im2-plan-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
       }
 
       .im2-nui-stats{
@@ -3822,7 +4010,7 @@
         }
 
         .im2-plan-summary{
-          grid-template-columns:1fr 1fr 1fr
+          grid-template-columns:1fr 1fr
         }
       }
     `;
@@ -3877,7 +4065,7 @@
       ],
       organize: [
         '자동 정리',
-        '아이템 내용과 기존 폴더를 살펴 목적지를 제안합니다.',
+        '폴더 밖 아이템을 확인하고 목적지 폴더별로 한 번에 정리합니다.',
       ],
       nui: [
         '누이 교환',
@@ -3910,6 +4098,8 @@
     const oldContent = overlay.querySelector('.im2-content');
     const contentScroll = oldContent ? oldContent.scrollTop : 0;
     const oldGroups = overlay.querySelectorAll('[data-plan-group]');
+    const oldGroupKeys = new Set([...oldGroups]
+      .map((group) => group.dataset.planGroup));
     const openGroups = new Set([...oldGroups]
       .filter((group) => group.open)
       .map((group) => group.dataset.planGroup));
@@ -4063,7 +4253,9 @@
     if (newContent) newContent.scrollTop = contentScroll;
     if (oldGroups.length) {
       overlay.querySelectorAll('[data-plan-group]').forEach((group) => {
-        group.open = openGroups.has(group.dataset.planGroup);
+        if (oldGroupKeys.has(group.dataset.planGroup)) {
+          group.open = openGroups.has(group.dataset.planGroup);
+        }
       });
     }
 
@@ -4813,6 +5005,7 @@
     const totals =
       plans
         ? {
+            root: plans.reduce((n, p) => n + p.decisions.length, 0),
             creates: plans.reduce(
               (n, p) =>
                 n + p.createFolders.length,
@@ -4833,29 +5026,17 @@
             review: plans.reduce((n, p) => n + p.decisions.filter(
               (decision) => decision.tier === 'review').length, 0),
             stays: plans.reduce((n, p) => n + p.decisions.filter(
-              (decision) => decision.tier === 'stay').length, 0),
+              (decision) => !decision.target && !decision.suggestion
+                && decision.reason !== '직접 보류').length, 0),
           }
         : null;
 
     return `
-      <div class="im2-settings-grid">
-        <section
-          class="im2-section"
-          style="margin-top:0"
-        >
-          <div class="im2-section-head">
-            <div>
-              <div class="im2-section-title">
-                정리 규칙
-              </div>
-
-              <div class="im2-section-desc">
-                폴더 밖 아이템만 대상으로 합니다.
-              </div>
-            </div>
-          </div>
-
-          <div class="im2-section-body">
+      <div class="im2-organize-layout">
+        <details class="im2-section im2-organize-settings"
+          data-plan-group="organize-settings">
+          <summary>자동 추천 설정 · 선택 사항</summary>
+          <div class="im2-organize-settings-body">
             <div class="im2-field">
               <label>
                 종류 우선순위
@@ -4946,10 +5127,10 @@
               data-action="plan-organize"
               ${available.length ? '' : 'disabled'}
             >
-              변경 내용 미리보기
+              목록 다시 분석
             </button>
           </div>
-        </section>
+        </details>
 
         <section
           class="im2-section"
@@ -4958,13 +5139,18 @@
           <div class="im2-section-head">
             <div>
               <div class="im2-section-title">
-                미리보기
+                폴더 밖 아이템
               </div>
 
               <div class="im2-section-desc">
-                확실한 이동만 기본 선택합니다. 나머지는 확인 후 추가할 수 있습니다.
+                확실한 추천은 이동 계획에 포함됩니다. 체크한 항목은 목적지를 한 번에 바꿀 수 있습니다.
               </div>
             </div>
+            ${plans ? `
+              <button class="im2-btn" data-action="plan-organize"
+                ${available.length ? '' : 'disabled'}>
+                다시 분석
+              </button>` : ''}
           </div>
 
           <div class="im2-section-body">
@@ -4972,6 +5158,13 @@
               plans
                 ? `
                   <div class="im2-plan-summary">
+                    <div class="im2-plan-stat">
+                      <span>폴더 밖 아이템</span>
+                      <strong>
+                        ${formatNumber(totals.root)}
+                      </strong>
+                    </div>
+
                     <div class="im2-plan-stat">
                       <span>새 폴더</span>
                       <strong>
@@ -4987,21 +5180,23 @@
                     </div>
 
                     <div class="im2-plan-stat">
-                      <span>확인 필요</span>
+                      <span>추천 확인</span>
                       <strong>
                         ${formatNumber(totals.review)}
                       </strong>
                     </div>
 
                     <div class="im2-plan-stat">
-                      <span>그대로 두기</span>
+                      <span>목적지 미정</span>
                       <strong>
                         ${formatNumber(totals.stays)}
                       </strong>
                     </div>
                   </div>
 
-                  ${plans.map(renderPlanCharacter).join('')}
+                  ${totals.root
+                    ? plans.map(renderPlanCharacter).join('')
+                    : '<div class="im2-empty">폴더 밖에 정리할 아이템이 없습니다.</div>'}
 
                   <button
                     class="im2-btn primary"
@@ -5013,19 +5208,32 @@
                         : 'disabled'
                     }
                   >
-                    이 계획 적용
+                    정리 계획 적용
                   </button>
                 `
                 : `
                   <div class="im2-empty">
-                    규칙을 설정한 뒤 미리보기를 만드세요.
+                    인벤토리를 불러온 뒤 폴더 밖 아이템 목록을 만들 수 있습니다.
                   </div>
+                  <button class="im2-btn primary" style="width:100%;margin-top:12px"
+                    data-action="plan-organize" ${available.length ? '' : 'disabled'}>
+                    폴더 밖 아이템 목록 만들기
+                  </button>
                 `
             }
           </div>
         </section>
       </div>
     `;
+  }
+
+  function organizeSelectionFor(characterId) {
+    state.organizeSelections = state.organizeSelections || {};
+    const key = String(characterId);
+    if (!(state.organizeSelections[key] instanceof Set)) {
+      state.organizeSelections[key] = new Set();
+    }
+    return state.organizeSelections[key];
   }
 
   function renderPlanCharacter(plan) {
@@ -5037,90 +5245,125 @@
       (folderNameCounts.get(folder.name) || 0) + 1));
     const folderLabel = (folder) => folderNameCounts.get(folder.name) > 1
       ? `${folder.name} (ID ${folder.id})` : folder.name;
-    const destinationName = (value) => value.startsWith('new:')
-      ? `${value.slice(4)} (새 폴더)`
-      : (() => {
-        const folder = folders.find((entry) => String(entry.id) === value);
-        return folder ? folderLabel(folder) : '목적지 없음';
-      })();
-    const renderDecision = (decision) => {
-      const rule = (state.organizeRules[plan.characterId] || {})[
-        normalizeItemName(decision.itemName).toLocaleLowerCase('ko')];
-      const selected = decision.target || (decision.reason === '직접 보류' ? 'skip' : 'auto');
-      const remembered = rule && (rule === (decision.target || 'skip')
-        || (String(rule).startsWith('new:') && decision.target
-          && destinationName(decision.target) === String(rule).slice(4)));
-      const newDestination = [decision.target, decision.suggestion]
-        .find((value) => value.startsWith('new:'));
-      return `
-        <div class="im2-plan-item">
-          <div><strong>${escapeHtml(decision.itemName)}</strong>
-            <span class="im2-help"> · ${escapeHtml(decision.reason)}</span></div>
-          <div class="im2-plan-item-controls">
-            <select class="im2-input" aria-label="${escapeHtml(decision.itemName)} 목적지"
-              data-input="organize-destination"
-              data-character="${escapeHtml(plan.characterId)}"
-              data-item="${escapeHtml(decision.itemId)}">
-              <option value="auto" ${selected === 'auto' ? 'selected' : ''}>자동 판단</option>
-              <option value="skip" ${selected === 'skip' ? 'selected' : ''}>이동하지 않음</option>
-              ${folders.map((folder) => `
-                <option value="${escapeHtml(folder.id)}"
-                  ${selected === String(folder.id) ? 'selected' : ''}>
-                  ${escapeHtml(folderLabel(folder))}
-                </option>`).join('')}
-              ${newDestination ? `<option value="${escapeHtml(newDestination)}"
-                ${selected === newDestination ? 'selected' : ''}>
-                ${escapeHtml(destinationName(newDestination))}</option>` : ''}
-            </select>
-            <label class="im2-help">
-              <input type="checkbox" data-input="organize-remember"
-                data-character="${escapeHtml(plan.characterId)}"
-                data-item="${escapeHtml(decision.itemId)}"
-                ${remembered ? 'checked' : ''}
-                ${selected === 'auto' ? 'disabled' : ''}>
-              앞으로 같은 이름에도 적용
-            </label>
-            ${rule && !remembered ? `<span class="im2-help">
-              이번만 변경 · 기억한 규칙은 ${escapeHtml(rule === 'skip'
-                ? '이동하지 않음' : destinationName(String(rule)))}
-            </span>` : ''}
-          </div>
-        </div>`;
+    const destinationName = (value) => {
+      const key = String(value || '');
+      if (!key) return '목적지 미정';
+      if (key.startsWith('new:')) return `${key.slice(4)} (새 폴더)`;
+      const folder = folders.find((entry) => String(entry.id) === key);
+      return folder ? folderLabel(folder) : '목적지 없음';
     };
-    const renderGroup = (title, decisions, key, open = false) => {
-      if (!decisions.length) return '';
-      const byDestination = new Map();
-      decisions.forEach((decision) => {
-        const destination = decision.target || decision.suggestion || '';
-        if (!byDestination.has(destination)) byDestination.set(destination, []);
-        byDestination.get(destination).push(decision);
-      });
+    const selected = organizeSelectionFor(plan.characterId);
+    const groupEntries = buildOrganizeQuickViewModel(snapshot, plan.decisions, origin);
+    const uniqueNewDestinations = [...new Set(plan.decisions
+      .flatMap((decision) => [decision.target, decision.suggestion])
+      .filter((value) => value && value.startsWith('new:')))];
+    const selectedDestination = state.organizeDestinationChoices[plan.characterId] || '';
+    const destinationOptions = `
+      <option value="" ${selectedDestination === '' ? 'selected' : ''}>목적지 선택</option>
+      <option value="auto" ${selectedDestination === 'auto' ? 'selected' : ''}>자동 판단으로 되돌리기</option>
+      ${folders.map((folder) => `
+        <option value="${escapeHtml(folder.id)}" ${selectedDestination === String(folder.id) ? 'selected' : ''}>${escapeHtml(folderLabel(folder))}</option>`).join('')}
+      ${uniqueNewDestinations.map((destination) => `
+        <option value="${escapeHtml(destination)}" ${selectedDestination === destination ? 'selected' : ''}>${escapeHtml(destinationName(destination))}</option>`).join('')}
+      <option value="skip" ${selectedDestination === 'skip' ? 'selected' : ''}>그대로 두기</option>`;
+    const renderItem = ({ decision, record, imageUrl, types, quantity }) => {
+      const image = imageUrl
+        ? `<img class="im2-organize-thumb" src="${escapeHtml(imageUrl)}" alt="" loading="lazy">`
+        : '<span class="im2-organize-thumb" aria-hidden="true">◇</span>';
+      const typeLabel = types.length ? types.join(' · ') : '종류 정보 없음';
+      const status = decision.target
+        ? `이동 예정 · ${destinationName(decision.target)}`
+        : decision.suggestion
+          ? `추천 · ${destinationName(decision.suggestion)}`
+          : decision.reason === '직접 보류' ? '이번 정리에서 보류' : '목적지 미정';
       return `
-        <details class="im2-plan-group" data-plan-group="${escapeHtml(plan.characterId + ':' + key)}"
-          ${open ? 'open' : ''}>
-          <summary>${title} · ${formatNumber(decisions.length)}</summary>
-          ${[...byDestination.entries()].map(([destination, items]) => `
-            <div class="im2-plan-destination">
-              <strong>${destination ? escapeHtml(destinationName(destination)) : '목적지 미정'}</strong>
-              <span class="im2-help"> · ${formatNumber(items.length)}개</span>
-              ${key === 'review' && destination ? `
-                <button class="im2-btn" type="button"
-                  data-action="accept-organize-suggestions"
-                  data-character="${escapeHtml(plan.characterId)}"
-                  data-destination="${escapeHtml(destination)}">
-                  추천 모두 선택
-                </button>` : ''}
-            </div>
-            ${items.map(renderDecision).join('')}
-          `).join('')}
+        <label class="im2-organize-item">
+          <input type="checkbox" data-input="organize-select-item"
+            data-character="${escapeHtml(plan.characterId)}"
+            data-item="${escapeHtml(decision.itemId)}"
+            ${selected.has(String(decision.itemId)) ? 'checked' : ''}>
+          ${image}
+          <span class="im2-organize-item-body">
+            <strong class="im2-organize-item-name">${escapeHtml(decision.itemName)}</strong>
+            <span class="im2-organize-item-meta">
+              <span>${escapeHtml(typeLabel)}</span>
+              <span>수량 ${quantity !== null ? formatNumber(quantity) : '—'}</span>
+            </span>
+            <span class="im2-organize-item-reason">${escapeHtml(status)} · ${escapeHtml(decision.reason)}</span>
+          </span>
+        </label>`;
+    };
+    const renderGroup = (group) => {
+      const { key, kind, destination, reason, label, items } = group;
+      const decisions = items.map((item) => item.decision);
+      const selectedCount = decisions.filter((decision) => selected.has(String(decision.itemId))).length;
+      const allSelected = selectedCount === decisions.length && decisions.length > 0;
+      const suggestion = kind === 'suggestion' ? destination : '';
+      const allSkipped = items.length > 0
+        && items.every((item) => item.decision.reason === '직접 보류');
+      const heading = kind === 'target'
+        ? `이동 예정 · ${destinationName(destination)}`
+        : kind === 'suggestion'
+          ? `추천 · ${destinationName(destination)}`
+          : allSkipped
+            ? '보류한 항목'
+            : `목적지 미정 · ${label || reason}`;
+      return `
+        <details class="im2-plan-group" data-plan-group="${escapeHtml(plan.characterId + ':' + key)}" open>
+          <summary>${escapeHtml(heading)} · ${formatNumber(decisions.length)}개</summary>
+          <div class="im2-organize-group-head">
+            <strong>${formatNumber(selectedCount)}개 선택</strong>
+            <button class="im2-btn" type="button"
+              data-action="toggle-organize-group-selection"
+              data-character="${escapeHtml(plan.characterId)}"
+              data-group-key="${encodeKey(key)}">
+              ${allSelected ? '그룹 선택 해제' : '그룹 전체 선택'}
+            </button>
+            ${suggestion ? `
+              <button class="im2-btn primary" type="button"
+                data-action="accept-organize-suggestions"
+                data-character="${escapeHtml(plan.characterId)}"
+                data-destination="${escapeHtml(suggestion)}">
+                추천 ${formatNumber(decisions.length)}개를 이동 계획에 추가
+              </button>` : ''}
+          </div>
+          ${items.map(renderItem).join('')}
         </details>`;
     };
+    const selectedCount = selected.size;
     return `
-      <div class="im2-plan-char">
-        <strong>${escapeHtml(plan.characterName)}</strong>
-        ${renderGroup('이동 예정', plan.decisions.filter((d) => d.tier === 'ready'), 'ready')}
-        ${renderGroup('확인 필요', plan.decisions.filter((d) => d.tier === 'review'), 'review', true)}
-        ${renderGroup('그대로 두기', plan.decisions.filter((d) => d.tier === 'stay'), 'stay')}
+      <div class="im2-organize-character">
+        <div class="im2-organize-character-head">
+          <strong>${escapeHtml(plan.characterName)}</strong>
+          <span class="im2-help">· 폴더 밖 ${formatNumber(plan.decisions.length)}개 항목</span>
+        </div>
+        ${plan.decisions.length ? `
+          <div class="im2-organize-bulkbar">
+            <strong>${formatNumber(selectedCount)}개 선택</strong>
+            <button class="im2-btn" type="button" data-action="select-all-organize-items"
+              data-character="${escapeHtml(plan.characterId)}">전체 선택</button>
+            <button class="im2-btn" type="button" data-action="clear-organize-selection"
+              data-character="${escapeHtml(plan.characterId)}">선택 해제</button>
+            <select class="im2-select" aria-label="${escapeHtml(plan.characterName)} 선택 항목 목적지"
+              data-input="organize-destination-choice"
+              data-organize-destination-choice="${escapeHtml(plan.characterId)}">
+              ${destinationOptions}
+            </select>
+            <label>
+              <input type="checkbox" data-input="organize-remember-choice"
+                data-character="${escapeHtml(plan.characterId)}"
+                ${state.organizeRememberChoices[plan.characterId] ? 'checked' : ''}>
+              앞으로 같은 이름에도 적용
+            </label>
+            <button class="im2-btn primary" type="button"
+              data-action="assign-organize-selection"
+              data-character="${escapeHtml(plan.characterId)}"
+              ${selectedCount ? '' : 'disabled'}>
+              선택 항목 목적지 지정
+            </button>
+          </div>
+          ${groupEntries.map(renderGroup).join('')}
+        ` : '<div class="im2-empty">이 캐릭터는 폴더 밖에 정리할 아이템이 없습니다.</div>'}
       </div>`;
   }
 
@@ -6830,6 +7073,9 @@
     state.organizePlans =
       null;
     state.organizeOverrides = {};
+    state.organizeSelections = {};
+    state.organizeRememberChoices = {};
+    state.organizeDestinationChoices = {};
 
     const summary =
       summarizeSnapshots(snapshots);
@@ -6851,7 +7097,11 @@
       ),
     );
 
-    renderApp();
+    if (state.view === 'organize' && snapshots.some((snapshot) => !snapshot.error)) {
+      planOrganize();
+    } else {
+      renderApp();
+    }
 
     return {
       ok: summary.errors.length === 0,
@@ -7349,7 +7599,8 @@
   }
 
   function planOrganize() {
-    state.organizePlans =
+    const previousSelections = state.organizeSelections || {};
+    const plans =
       state.snapshots
         .filter(
           (snapshot) =>
@@ -7372,6 +7623,16 @@
               },
             ),
         );
+
+    state.organizePlans = plans;
+    state.organizeSelections = Object.fromEntries(plans.map((plan) => {
+      const validIds = new Set(plan.decisions.map((decision) => String(decision.itemId)));
+      const previous = previousSelections[plan.characterId];
+      const selected = previous instanceof Set
+        ? [...previous].filter((itemId) => validIds.has(String(itemId)))
+        : [];
+      return [String(plan.characterId), new Set(selected)];
+    }));
 
     renderApp();
   }
@@ -8682,7 +8943,13 @@
         null;
 
       setMessage(null);
-      renderApp();
+      if (state.view === 'organize'
+        && state.organizePlans === null
+        && state.snapshots.some((snapshot) => !snapshot.error)) {
+        planOrganize();
+      } else {
+        renderApp();
+      }
       if (state.view === 'nui-wanted' && !wantedCatalogRequested) {
         refreshNuiWantedCatalog();
       }
@@ -9301,11 +9568,104 @@
       const plan = (state.organizePlans || []).find((entry) => entry.characterId === charId);
       if (!plan) return;
       state.organizeOverrides[charId] = state.organizeOverrides[charId] || {};
-      plan.decisions.filter((decision) =>
+      const remember = state.organizeRememberChoices[charId] === true;
+      state.organizeRules[charId] = state.organizeRules[charId] || {};
+      const accepted = plan.decisions.filter((decision) =>
         decision.tier === 'review' && decision.suggestion === destination)
-        .forEach((decision) => {
+      accepted.forEach((decision) => {
+        if (remember) {
+          const ruleKey = normalizeItemName(decision.itemName).toLocaleLowerCase('ko');
+          state.organizeRules[charId][ruleKey] = destination;
+          delete state.organizeOverrides[charId][decision.itemId];
+        } else {
           state.organizeOverrides[charId][decision.itemId] = destination;
-        });
+        }
+      });
+      const selected = organizeSelectionFor(charId);
+      accepted.forEach((decision) => selected.delete(String(decision.itemId)));
+      state.organizeRememberChoices[charId] = false;
+      if (remember) persistSettings();
+      planOrganize();
+      return;
+    }
+
+    if (action === 'select-all-organize-items') {
+      const charId = target.dataset.character;
+      const plan = (state.organizePlans || []).find((entry) => entry.characterId === charId);
+      if (!plan) return;
+      state.organizeSelections[charId] = new Set(
+        plan.decisions.map((decision) => String(decision.itemId)),
+      );
+      renderApp();
+      return;
+    }
+
+    if (action === 'clear-organize-selection') {
+      const charId = target.dataset.character;
+      state.organizeSelections[charId] = new Set();
+      renderApp();
+      return;
+    }
+
+    if (action === 'toggle-organize-group-selection') {
+      const charId = target.dataset.character;
+      const groupKey = decodeKey(target.dataset.groupKey);
+      const plan = (state.organizePlans || []).find((entry) => entry.characterId === charId);
+      if (!plan) return;
+      const decisions = plan.decisions.filter((decision) =>
+        organizeDecisionGroupKey(decision) === groupKey);
+      const selected = organizeSelectionFor(charId);
+      const allSelected = decisions.length > 0
+        && decisions.every((decision) => selected.has(String(decision.itemId)));
+      decisions.forEach((decision) => {
+        if (allSelected) selected.delete(String(decision.itemId));
+        else selected.add(String(decision.itemId));
+      });
+      renderApp();
+      return;
+    }
+
+    if (action === 'assign-organize-selection') {
+      const charId = target.dataset.character;
+      const plan = (state.organizePlans || []).find((entry) => entry.characterId === charId);
+      const selected = organizeSelectionFor(charId);
+      const destinationInput = [...overlay.querySelectorAll('[data-organize-destination-choice]')]
+        .find((input) => input.dataset.organizeDestinationChoice === charId);
+      const destination = destinationInput && destinationInput.value;
+      if (!plan || !selected.size) {
+        setMessage('먼저 목적지를 지정할 아이템을 선택하세요.', 'error');
+        renderApp();
+        return;
+      }
+      if (!destination) {
+        setMessage('선택한 아이템의 목적지 폴더를 선택하세요.', 'error');
+        renderApp();
+        return;
+      }
+
+      const remember = state.organizeRememberChoices[charId] === true;
+      state.organizeOverrides[charId] = state.organizeOverrides[charId] || {};
+      state.organizeRules[charId] = state.organizeRules[charId] || {};
+      const selectedIds = [...selected];
+      selectedIds.forEach((itemId) => {
+        const decision = plan.decisions.find((entry) => String(entry.itemId) === itemId);
+        if (!decision) return;
+        const ruleKey = normalizeItemName(decision.itemName).toLocaleLowerCase('ko');
+        if (destination === 'auto') {
+          delete state.organizeOverrides[charId][itemId];
+          delete state.organizeRules[charId][ruleKey];
+        } else if (remember) {
+          state.organizeRules[charId][ruleKey] = destination;
+          delete state.organizeOverrides[charId][itemId];
+        } else {
+          state.organizeOverrides[charId][itemId] = destination;
+        }
+      });
+
+      state.organizeSelections[charId] = new Set();
+      state.organizeRememberChoices[charId] = false;
+      state.organizeDestinationChoices[charId] = '';
+      if (remember || destination === 'auto') persistSettings();
       planOrganize();
       return;
     }
@@ -9353,6 +9713,9 @@
 
       state.organizePlans =
         null;
+      state.organizeSelections[charId] = new Set();
+      state.organizeDestinationChoices[charId] = '';
+      state.organizeRememberChoices[charId] = false;
 
       persistSettings();
       renderApp();
@@ -9675,6 +10038,29 @@
       !target
       || !target.dataset.input
     ) {
+      return;
+    }
+
+    if (target.dataset.input === 'organize-destination-choice') {
+      const charId = target.dataset.organizeDestinationChoice;
+      state.organizeDestinationChoices[charId] = target.value;
+      return;
+    }
+
+    if (target.dataset.input === 'organize-select-item') {
+      const charId = target.dataset.character;
+      const itemId = String(target.dataset.item || '');
+      const selected = organizeSelectionFor(charId);
+      if (target.checked) selected.add(itemId);
+      else selected.delete(itemId);
+      renderApp();
+      return;
+    }
+
+    if (target.dataset.input === 'organize-remember-choice') {
+      const charId = target.dataset.character;
+      state.organizeRememberChoices[charId] = Boolean(target.checked);
+      renderApp();
       return;
     }
 
